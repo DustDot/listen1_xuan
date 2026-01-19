@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:install_plugin/install_plugin.dart';
@@ -50,8 +51,8 @@ class UpdController extends GetxController {
 
   /// 获取 GitHub OAuth Token
   Future<String?> _getGithubToken() async {
-    final prefs = SharedPreferencesAsync();
-    return await prefs.getString('githubOauthAccessKey');
+    final s = Get.find<SettingsController>();
+    return await s.getString('githubOauthAccessKey');
   }
 
   /// 获取 GitHub API 请求头
@@ -812,7 +813,7 @@ class UpdController extends GetxController {
         await delReleasesCache(oldReleases, latestBuildNumber);
       }
 
-      if (localBuildNumber != latestBuildNumber) {
+      if (localBuildNumber != latestBuildNumber && !kDebugMode) {
         // 有新版本可用
         _showReleaseUpdateDialog(latestRelease, latestBuild);
       }
