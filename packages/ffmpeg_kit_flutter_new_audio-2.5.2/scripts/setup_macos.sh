@@ -21,16 +21,6 @@ BUNDLED_SHA256="415a871b964a8c3c12a4d0e7e02a30cf877380b29624cbc4f533590d3f4b9a25
 
 FRAMEWORKS="ffmpegkit libavcodec libavdevice libavfilter libavformat libavutil libswresample libswscale"
 
-# Self-healing / idempotent.
-if [ -d "Frameworks/ffmpegkit.framework" ]; then
-  echo "[ffmpeg_kit_flutter] macOS frameworks already present — skipping setup."
-  exit 0
-fi
-
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/ffmpegkit-macos.XXXXXX")"
-cleanup() { rm -rf "$WORK"; }
-trap cleanup EXIT
-
 fail() {
   {
     echo ""
@@ -45,6 +35,31 @@ fail() {
   } >&2
   exit 1
 }
+
+sign_frameworks() {
+  local BASE="$1"
+  for FW in $FRAMEWORKS; do
+    local PATH_TO_FRAMEWORK="${BASE}/${FW}.framework"
+    [ -d "$PATH_TO_FRAMEWORK" ] || return 1
+    codesign --force --sign - --timestamp=none "$PATH_TO_FRAMEWORK" || return 1
+    codesign --verify --strict "$PATH_TO_FRAMEWORK" || return 1
+  done
+}
+
+command -v codesign >/dev/null 2>&1 || fail "The codesign tool is unavailable."
+
+# Self-healing / idempotent. Re-sign an existing installation because tools
+# such as bitcode_strip invalidate any signature shipped in the archive.
+if [ -d "Frameworks/ffmpegkit.framework" ]; then
+  echo "[ffmpeg_kit_flutter] Signing existing macOS frameworks..."
+  sign_frameworks "Frameworks" || fail "Existing frameworks are incomplete or could not be signed."
+  echo "[ffmpeg_kit_flutter] macOS frameworks already present and valid."
+  exit 0
+fi
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ffmpegkit-macos.XXXXXX")"
+cleanup() { rm -rf "$WORK"; }
+trap cleanup EXIT
 
 [ -f "$BUNDLED_ARCHIVE" ] || fail "The bundled archive is missing."
 [ -s "$BUNDLED_ARCHIVE" ] || fail "The bundled archive is empty."
@@ -74,6 +89,12 @@ for FW in $FRAMEWORKS; do
   BIN="$WORK/extract/${FW}.framework/${FW}"
   [ -f "$BIN" ] && xcrun bitcode_strip -r "$BIN" -o "$BIN"
 done
+
+# macOS signs the outer app even for a local release build. Its nested dynamic
+# frameworks must therefore carry at least an ad-hoc signature. A distribution
+# build can replace this signature with its configured identity during embed.
+echo "[ffmpeg_kit_flutter] Signing macOS frameworks..."
+sign_frameworks "$WORK/extract" || fail "Failed to ad-hoc sign the macOS frameworks."
 
 # --- Atomic install ---
 rm -rf Frameworks

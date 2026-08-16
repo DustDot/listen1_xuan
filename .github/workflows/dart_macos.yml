@@ -48,6 +48,12 @@ jobs:
         run: |
           cd macos
           pod install
+
+      - name: Verify bundled FFmpeg framework signatures
+        run: |
+          for framework in packages/ffmpeg_kit_flutter_new_audio-2.5.2/macos/Frameworks/*.framework; do
+            codesign --verify --strict --verbose=2 "$framework"
+          done
       
       # 替换distribute_options.yaml中的$GITHASH
       - name: Replace GITHASH in distribute_options.yaml

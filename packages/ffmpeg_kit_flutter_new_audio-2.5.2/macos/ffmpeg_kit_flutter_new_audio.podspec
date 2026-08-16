@@ -33,12 +33,11 @@ Pod::Spec.new do |s|
                                  'Frameworks/libswscale.framework'
     ss.osx.deployment_target = '10.15'
 
-    # Adding pre-install hook for macOS
+    # Keep this unconditional so an older, unsigned local extraction can be
+    # repaired after setup_macos.sh changes.
     s.prepare_command = <<-CMD
-      if [ ! -d "./Frameworks/ffmpegkit.framework" ]; then
-        chmod +x ../scripts/setup_macos.sh
-        ../scripts/setup_macos.sh
-      fi
+      chmod +x ../scripts/setup_macos.sh
+      ../scripts/setup_macos.sh
     CMD
   end
 end
