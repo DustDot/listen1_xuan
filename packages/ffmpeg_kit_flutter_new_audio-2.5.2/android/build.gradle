@@ -12,16 +12,15 @@ buildscript {
     }
 }
 
-allprojects {
+def ffmpegKitLibsDir = file("$projectDir/libs")
+
+rootProject.allprojects {
     repositories {
+        flatDir {
+            dirs(ffmpegKitLibsDir)
+        }
         google()
         mavenCentral()
-    }
-}
-
-repositories {
-    flatDir {
-        dirs("$projectDir/libs")
     }
 }
 
