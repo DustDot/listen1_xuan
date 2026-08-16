@@ -1,14 +1,14 @@
 import 'dart:convert';
 import 'dart:ui';
 import 'package:animations/animations.dart';
-import 'package:archive/archive_io.dart';
 import 'package:flutter/foundation.dart';
+import 'package:listen1_xuan/bl.dart';
+import 'package:listen1_xuan/widgets/ext/ext_widget.dart';
 import 'package:wolt_modal_sheet/wolt_modal_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:listen1_xuan/controllers/controllers.dart';
-import 'package:listen1_xuan/controllers/hyper_download_controller.dart';
 import 'package:listen1_xuan/main.dart';
 import 'package:listen1_xuan/play.dart';
 import 'package:logger/logger.dart';
@@ -17,9 +17,7 @@ import 'controllers/upd_controller.dart';
 import 'models/GitHubRelease.dart';
 import 'models/SupabasePlaylist.dart' as PlaylistModel;
 import 'dart:io';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'controllers/DioController.dart';
 import 'controllers/cache_controller.dart';
 import 'controllers/myPlaylist_controller.dart';
@@ -29,17 +27,14 @@ import 'controllers/routeController.dart';
 import 'controllers/supabase_auth_controller.dart';
 import 'controllers/websocket_client_controller.dart';
 import 'pages/settings/play_buttons_settings_page.dart';
-import 'pages/settings/settings_supabase_login_page.dart';
 import 'pages/settings/settings_password_dialog.dart';
-import 'examples/equalizer_integration_example.dart';
+import 'pages/settings/select_audio_quality_of_bl_dialog.dart';
 import 'examples/websocket_client_example.dart';
 import 'examples/websocket_server_example.dart';
 import 'funcs.dart';
 import 'models/websocket_message.dart';
-import 'netease.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:marquee/marquee.dart';
-import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:webview_cookie_manager/webview_cookie_manager.dart';
@@ -47,16 +42,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:dio/dio.dart';
 import 'dart:async';
-import 'package:archive/archive.dart';
-import 'package:install_plugin/install_plugin.dart';
 import 'package:system_info3/system_info3.dart';
 import 'global_settings_animations.dart';
 import 'package:webview_windows/webview_windows.dart';
-import 'package:window_manager/window_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
-import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:charset_converter/charset_converter.dart';
 import 'package:get/get.dart' hide Response;
 import 'package:adaptive_theme/adaptive_theme.dart';
@@ -69,9 +60,10 @@ import 'package:iconify_flutter_plus/icons/mdi.dart';
 import 'package:iconify_flutter_plus/icons/fa_solid.dart';
 import 'package:path/path.dart' as p;
 import 'utils/curve_utils.dart';
+import 'utils/platform_credentials.dart';
 import 'widgets/curve_selector_dialog.dart';
 import 'package:flutter/material.dart' hide SearchController;
-import 'pages/settings/cache_naming_page.dart';
+import 'widgets/elevated_button_icon.dart';
 part 'pages/settings/settings_utils.dart';
 part 'pages/settings/settings_github.dart';
 part 'pages/settings/settings_widgets.dart';
@@ -92,6 +84,7 @@ Logger logger = Logger(
     printEmojis: true,
     dateTimeFormat: DateTimeFormat.dateAndTime,
   ),
+  level: Level.debug,
 );
 
 class LoginWebview extends StatefulWidget {
@@ -120,7 +113,6 @@ class _LoginWebviewState extends State<LoginWebview> {
           showErrorSnackbar('获取cookie失败', null);
           return;
         }
-        print(url);
         if (!url.contains('code=')) {
           // _msg('获取code失败', 3.0);
           showErrorSnackbar('获取code失败', '请确认已跳转到Github授权成功页面再点击按钮');
@@ -132,35 +124,29 @@ class _LoginWebviewState extends State<LoginWebview> {
       default:
         if (isWindows) {
           var t = jsonDecode(await widget.controller.getCookies())["cookies"];
-
-          print(t);
-          String cookies = "";
-          for (var item in t) {
-            cookies += "${item['name']}=${Uri.decodeComponent(item['value'])};";
-          }
-          cookies = cookies.substring(0, cookies.length - 1);
-          await savePlatformToken(widget.config_key, cookies);
-          // _msg('设置成功$cookies', 3.0);
+          final cookies = t
+              .map<Cookie>(
+                (item) =>
+                    Cookie(item['name'] as String, item['value'] as String),
+              )
+              .toList();
+          await savePlatformToken(
+            PlatformCredentials(
+              platform: widget.config_key,
+              credentials: cookies,
+            ),
+          );
           showSuccessSnackbar('设置成功', null);
         } else {
-          if (isMacOS) {
-            // TODO: MacOS 支持
-            showErrorSnackbar('MacOS暂不支持此功能', null);
-            return;
-          }
           final cookieManager = WebviewCookieManager();
 
           final gotCookies = await cookieManager.getCookies(widget.open_url);
-          for (var item in gotCookies) {
-            print(item);
-          }
-          String cookies = "";
-          for (var item in gotCookies) {
-            cookies += "${item.name}=${item.value};";
-          }
-          cookies = cookies.substring(0, cookies.length - 1);
-          await savePlatformToken(widget.config_key, cookies);
-          // _msg('设置成功$cookies', 3.0);
+          await savePlatformToken(
+            PlatformCredentials(
+              platform: widget.config_key,
+              credentials: gotCookies,
+            ),
+          );
           showSuccessSnackbar('设置成功', null);
         }
     }
@@ -289,23 +275,20 @@ class _LoginWebviewState extends State<LoginWebview> {
     return Scaffold(
       appBar: AppBar(
         // title: const Text('请登录后，点击右上角保存cooke按钮'),
-        title: SizedBox(
-          height: 30,
-          child: Marquee(
-            text: '请登录后，点击右上角保存cookie按钮',
-            style: const TextStyle(fontSize: 20),
-            scrollAxis: Axis.horizontal,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            blankSpace: 20.0,
-            velocity: 100.0,
-            pauseAfterRound: const Duration(seconds: 1),
-            startPadding: 10.0,
-            accelerationDuration: const Duration(seconds: 1),
-            accelerationCurve: Curves.linear,
-            decelerationDuration: const Duration(milliseconds: 500),
-            decelerationCurve: Curves.easeOut,
-          ),
-        ),
+        title: Marquee(
+          text: '请登录后，点击右上角保存cookie按钮',
+          style: const TextStyle(fontSize: 20),
+          scrollAxis: Axis.horizontal,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          blankSpace: 20.0,
+          velocity: 100.0,
+          pauseAfterRound: const Duration(seconds: 1),
+          startPadding: 10.0,
+          accelerationDuration: const Duration(seconds: 1),
+          accelerationCurve: Curves.linear,
+          decelerationDuration: const Duration(milliseconds: 500),
+          decelerationCurve: Curves.easeOut,
+        ).sbh(30),
 
         actions: [
           Obx(
@@ -367,7 +350,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void open_bl_login() async {
     TextEditingController blCookieController = TextEditingController();
-    Map<String, dynamic> settings = settings_getsettings();
+    Map<String, dynamic> settings = lengcyGetSettings();
     if (settings.containsKey('bl')) {
       blCookieController.text = settings['bl'];
     }
@@ -407,13 +390,23 @@ class _SettingsPageState extends State<SettingsPage> {
                     focusNode: _focusNode,
                     decoration: const InputDecoration(labelText: '请输入B站cookie'),
                     onSubmitted: (String value) async {
-                      await savePlatformToken(PlantformCodes.bl, value);
+                      await savePlatformToken(
+                        PlatformCredentials(
+                          platform: PlantformCodes.bl,
+                          credentials: value,
+                        ),
+                      );
                       showSuccessSnackbar('设置成功', null);
                       Navigator.pop(context);
                       setState(() {});
                     },
                     onChanged: (value) async {
-                      await savePlatformToken(PlantformCodes.bl, value);
+                      await savePlatformToken(
+                        PlatformCredentials(
+                          platform: PlantformCodes.bl,
+                          credentials: value,
+                        ),
+                      );
                     },
                     controller: blCookieController,
                   ),
@@ -526,7 +519,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void get_useHttpOverrides() async {
-    Map<String, dynamic> settings = settings_getsettings();
+    Map<String, dynamic> settings = lengcyGetSettings();
     if (settings["useHttpOverrides"] != null) {
       useHttpOverrides.value = settings["useHttpOverrides"];
     }
@@ -544,23 +537,23 @@ class _SettingsPageState extends State<SettingsPage> {
     // 监听焦点变化
     _focusNode.addListener(() {
       if (_focusNode.hasFocus) {
-        set_inapp_hotkey(false);
+        setInAppHotKeyEnable(false);
       } else {
-        set_inapp_hotkey(true);
+        setInAppHotKeyEnable(true);
       }
     });
     _focusNode2.addListener(() {
       if (_focusNode2.hasFocus) {
-        set_inapp_hotkey(false);
+        setInAppHotKeyEnable(false);
       } else {
-        set_inapp_hotkey(true);
+        setInAppHotKeyEnable(true);
       }
     });
     _focusNode3.addListener(() {
       if (_focusNode3.hasFocus) {
-        set_inapp_hotkey(false);
+        setInAppHotKeyEnable(false);
       } else {
-        set_inapp_hotkey(true);
+        setInAppHotKeyEnable(true);
       }
     });
   }
@@ -655,12 +648,18 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       ExpansionPanel(
                         headerBuilder: (BuildContext context, bool isExpanded) {
+                          final theme = Theme.of(context);
+                          final resolvedIconColor =
+                              ListTileTheme.of(context).iconColor ??
+                              theme.listTileTheme.iconColor ??
+                              theme.colorScheme.onSurfaceVariant;
+                          final resolvedIconSize =
+                              IconTheme.of(context).size ?? 24.0;
                           return ListTile(
                             leading: Iconify(
                               Octicon.cache_16,
-                              color: AdaptiveTheme.of(
-                                Get.context!,
-                              ).theme.iconTheme.color,
+                              color: resolvedIconColor,
+                              size: resolvedIconSize,
                             ),
                             title: Text('缓存'),
                           );
@@ -722,12 +721,16 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       ExpansionPanel(
                         headerBuilder: (BuildContext context, bool isExpanded) {
+                          final theme = Theme.of(context);
+                          final resolvedIconColor =
+                              ListTileTheme.of(context).iconColor ??
+                              theme.listTileTheme.iconColor ??
+                              theme.colorScheme.onSurfaceVariant;
+
                           return ListTile(
                             leading: Iconify(
                               FaSolid.tshirt,
-                              color: AdaptiveTheme.of(
-                                Get.context!,
-                              ).theme.iconTheme.color,
+                              color: resolvedIconColor,
                               size: 18,
                             ),
                             title: Text('外观设置'),
@@ -741,8 +744,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       ExpansionPanel(
                         headerBuilder: (BuildContext context, bool isExpanded) {
                           return ListTile(
-                            leading: Icon(Icons.miscellaneous_services),
-                            title: Text('杂项'),
+                            leading: Icon(Icons.play_circle_fill_rounded),
+                            title: Text('播放设置'),
                           );
                         },
                         canTapOnHeader: true,
@@ -750,15 +753,61 @@ class _SettingsPageState extends State<SettingsPage> {
                             .contains(7),
                         body: Column(
                           children: [
+                            ListTile(
+                              leading: Icon(Icons.equalizer),
+                              title: const Text('均衡器设置'),
+                              trailing: Icon(Icons.chevron_right),
+                              onTap: () =>
+                                  Get.toNamed(RouteName.equalizerPage, id: 1),
+                            ),
+                            ListTile(
+                              leading: Icon(Icons.audiotrack),
+                              title: const Text('默认音频质量'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => DefaultQualitySettingsSheet.show(),
+                            ),
+                            Obx(
+                              () => SwitchListTile(
+                                title: const Text('音量跟随系统'),
+                                value: Get.find<SettingsController>()
+                                    .volumnFollowSystem,
+                                onChanged:
+                                    Get.find<SettingsController>()
+                                        .volumnFollowSystemChanging
+                                        .value
+                                    ? null
+                                    : (bool value) async {
+                                        Get.find<SettingsController>()
+                                                .volumnFollowSystemChanging
+                                                .value =
+                                            true;
+                                        Get.find<SettingsController>()
+                                                .volumnFollowSystem =
+                                            value;
+                                        await Get.find<PlayController>()
+                                            .updSysVolAndSet();
+                                        Get.find<SettingsController>()
+                                                .volumnFollowSystemChanging
+                                                .value =
+                                            false;
+                                      },
+                              ),
+                            ),
                             Obx(
                               () => SwitchListTile(
                                 title: const Text('下一首播放模式'),
                                 subtitle: Obx(
-                                  () => Text(
-                                    Get.find<SettingsController>()
-                                            .nextTrackQueueOrStackMethod
-                                        ? '队列：先添加的曲目将先播放'
-                                        : '栈：后添加的曲目将先播放',
+                                  () => setSubTitleTextAniSwi(
+                                    Text(
+                                      Get.find<SettingsController>()
+                                              .nextTrackQueueOrStackMethod
+                                          ? '队列：先添加的曲目将先播放'
+                                          : '栈：后添加的曲目将先播放',
+                                      key: ValueKey<bool>(
+                                        Get.find<SettingsController>()
+                                            .nextTrackQueueOrStackMethod,
+                                      ),
+                                    ),
                                   ),
                                 ),
                                 value: Get.find<SettingsController>()
@@ -772,12 +821,88 @@ class _SettingsPageState extends State<SettingsPage> {
                             ),
                             Obx(
                               () => SwitchListTile(
-                                title: const Text('默认搜索源/记忆上次搜索源'),
+                                title: const Text('在“循环播放”模式下列表播放完成时停止播放'),
+
+                                value: Get.find<SettingsController>()
+                                    .stopOnPlayListEnd,
+                                onChanged: (bool value) {
+                                  Get.find<SettingsController>()
+                                          .stopOnPlayListEnd =
+                                      value;
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      ExpansionPanel(
+                        headerBuilder: (BuildContext context, bool isExpanded) {
+                          return ListTile(
+                            leading: Icon(Icons.miscellaneous_services),
+                            title: Text('杂项'),
+                          );
+                        },
+                        canTapOnHeader: true,
+                        isExpanded: settingsController.settingsPageExpansion
+                            .contains(8),
+                        body: Column(
+                          children: [
+                            ListTile(
+                              leading: Icon(Icons.width_normal),
+                              title: const Text('当左边栏大于一定宽度时隐藏搜索页面的搜索框'),
+                              subtitle: Obx(
+                                () => setSubTitleTextAniSwi(
+                                  Text(
+                                    '当前宽度：${Get.find<XSearchController>().leftBarWidth.value.toStringAsFixed(2)}, 设置宽度：${Get.find<SettingsController>().showSearchAreaWidth.toStringAsFixed(2)}',
+                                    key: ValueKey<double>(
+                                      Get.find<XSearchController>()
+                                          .leftBarWidth
+                                          .value,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              onTap: showShowSearchAreaWidthInputDialog,
+                              onLongPress: () => showInfoSnackbar(
+                                '@zhiquanchi',
+                                'https://github.com/HBWuChang/listen1_xuan/issues/33',
+                              ),
+                            ),
+
+                            Obx(
+                              () => SwitchListTile(
+                                title: const Text('搜索源选择方式'),
+                                subtitle: Obx(
+                                  () => setSubTitleTextAniSwi(
+                                    Text(
+                                      Get.find<SettingsController>()
+                                              .searchUseLastSource
+                                          ? '记忆上次搜索源'
+                                          : '默认搜索源',
+                                      key: ValueKey<bool>(
+                                        Get.find<SettingsController>()
+                                            .searchUseLastSource,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                                 value: Get.find<SettingsController>()
                                     .searchUseLastSource,
                                 onChanged: (bool value) {
                                   Get.find<SettingsController>()
                                           .searchUseLastSource =
+                                      value;
+                                },
+                              ),
+                            ),
+                            Obx(
+                              () => SwitchListTile(
+                                title: const Text('复制错误信息到剪贴板'),
+                                value: Get.find<SettingsController>()
+                                    .copyErrorMessage,
+                                onChanged: (bool value) {
+                                  Get.find<SettingsController>()
+                                          .copyErrorMessage =
                                       value;
                                 },
                               ),
@@ -817,6 +942,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                       ),
                               ),
                             ),
+
                             Obx(
                               () => SwitchListTile(
                                 title: const Text('禁用ssl证书验证'),
@@ -845,7 +971,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
 
-                // buildEqualizerTile(context),
                 ListTile(
                   leading: Icon(Icons.book),
                   title: Text('查看README'),
@@ -854,7 +979,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     Get.toNamed(RouteName.settingsReadmePage, id: 1);
                   },
                 ),
-                SizedBox(height: 0.3.sh),
+                0.3.sh.sbh,
               ],
             ),
           ),

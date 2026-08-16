@@ -1,8 +1,8 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide CircularProgressIndicator;
 import 'package:get/get.dart';
-import 'package:get/get_connect/http/src/utils/utils.dart';
 import 'package:listen1_xuan/controllers/controllers.dart';
 import 'package:listen1_xuan/controllers/play_controller.dart';
+import 'package:listen1_xuan/widgets/draggable_toast/draggable_toast.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:listen1_xuan/models/UserProfile.dart';
@@ -11,9 +11,11 @@ import 'package:listen1_xuan/models/SupaContinuePlay.dart';
 import 'package:logger/logger.dart';
 import 'package:listen1_xuan/settings.dart' as settings;
 import 'package:uuid/uuid.dart';
+import '../widgets/progress_indicator_xuan.dart';
 
 import '../funcs.dart';
 import '../settings.dart';
+import '../utils/platform_credentials.dart';
 
 /// Supabase 认证控制器
 /// 管理用户登录、登出、会话状态等
@@ -975,6 +977,7 @@ class SupabaseAuthController extends GetxController {
       final tokens = <String, String?>{};
       for (var platform in ['bl', 'ne', 'qq', 'github']) {
         final token = await settings.outputPlatformToken(platform);
+        logger.d('本地 token - $platform: $token');
         if (token != null && token.isNotEmpty) {
           tokens[platform] = token;
         }
@@ -1038,8 +1041,10 @@ class SupabaseAuthController extends GetxController {
       for (var entry in cloudTokens.entries) {
         if (entry.value != null && entry.value!.isNotEmpty) {
           await settings.savePlatformToken(
-            entry.key,
-            entry.value!,
+            PlatformCredentials(
+              platform: entry.key,
+              credentials: entry.value!,
+            ),
             saveRightNow: false,
           );
         }
@@ -1172,8 +1177,8 @@ class SupabaseAuthController extends GetxController {
     RxBool loading = false.obs;
     String dateStr = newData['updated_at'] ?? '';
     dateStr = dateStr.replaceAll('T', ' ').split('.').first;
-    smoothSheetToast.showToast(
-      inLockMode:true,
+    draggableToastManager.show(
+      inLockMode: true,
       icon: Obx(
         () => loading.value
             ? Center(
@@ -1186,12 +1191,19 @@ class SupabaseAuthController extends GetxController {
                   ),
                 ),
               )
-            : Icon(Icons.playlist_play_rounded),
+            : Icon(Icons.playlist_play_rounded, color: Colors.white),
+      ),
+      config: DraggableToastConfig(
+        areaPadding: EdgeInsets.fromLTRB(8, 100, 8, 80),
+        snapEdges: const {ToastSnapEdge.left, ToastSnapEdge.right},
+        snapThreshold: 60,
+        expandedWidth: 300,
+        collapsedSize: 46,
       ),
       onDismiss: () {
         inupdateProcess.remove(playlistId);
       },
-      builder: (context, controller) {
+      builder: (context, state, controller) {
         return Padding(
           padding: EdgeInsets.all(8),
           child: Column(

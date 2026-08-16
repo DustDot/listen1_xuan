@@ -1,26 +1,25 @@
 // ignore_for_file: non_constant_identifier_names
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:listen1_xuan/controllers/cache_controller.dart';
 import 'package:listen1_xuan/funcs.dart';
 import 'package:listen1_xuan/main.dart';
+import 'package:listen1_xuan/models/OnlineCacheItem.dart';
 import 'package:listen1_xuan/models/Track.dart';
 import 'package:listen1_xuan/models/SupaContinuePlay.dart';
 import 'package:smtc_windows/smtc_windows.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'package:flutter_volume_controller/flutter_volume_controller.dart';
 import 'package:logger/logger.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart' hide Track;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:smooth_sheets/smooth_sheets.dart';
 import 'package:rxdart/rxdart.dart' as rxdart;
 import '../global_settings_animations.dart';
@@ -29,7 +28,6 @@ import '../models/MediaState.dart';
 import '../models/SongReplaceSettings.dart';
 import '../utils/curve_utils.dart';
 import 'lyric_controller.dart';
-import 'nowplaying_controller.dart';
 import 'routeController.dart';
 import 'settings_controller.dart';
 import 'websocket_card_controller.dart';
@@ -93,6 +91,7 @@ class PlayController extends GetxController
 
   ///用于记录正在引导播放的曲目id及下载文件名
   final bootStraping = RxMap<String, String>();
+  final bootStrapDownloading = RxMap<String, String>();
 
   // Windows任务栏进度 (0-100)
   final taskbarProgress = 0.obs;
@@ -118,17 +117,159 @@ class PlayController extends GetxController
     MediaState(
       position: Duration.zero,
       duration: Duration.zero,
+      buffer: Duration.zero,
+      buffering: false,
       playing: false,
     ),
   );
 
   var isplaying = false.obs;
 
+  Future<void> setEq() async {
+    String? eqString = Get.find<SettingsController>().eqSetting
+        .toFilterStringOfNowSelected();
+    if (isEmpty(eqString)) eqString = '';
+    await (music_player.platform as NativePlayer).setProperty('af', eqString!);
+    nowEq.value = await (music_player.platform as NativePlayer).getProperty(
+      'af',
+    );
+  }
+
+  Future<void> test() async {
+    await (music_player.platform as NativePlayer).setProperty(
+      'af',
+      'lavfi=help',
+    );
+  }
+
+  RxString nowEq = ''.obs;
+
+  Future<void> initSysVolAndSet() async {
+    if (settingsController.volumnFollowSystem) {
+      await Get.find<PlayController>().getSysVolAndSet();
+    }
+  }
+
+  /// 初始化音频会话，监听蓝牙断开等系统音频事件
+  Future<void> _initAudioSession() async {
+    if (!isAndroid) return;
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(
+        const AudioSessionConfiguration(
+          androidAudioAttributes: AndroidAudioAttributes(
+            contentType: AndroidAudioContentType.music,
+            usage: AndroidAudioUsage.media,
+          ),
+          androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+          androidWillPauseWhenDucked: true,
+        ),
+      );
+      debugPrint('Audio session configured: ${session.configuration}');
+      // 监听蓝牙/耳机断开事件 -> 自动暂停播放
+      session.becomingNoisyEventStream.listen((_) {
+        if (isplaying.value) {
+          globalPause();
+        }
+      });
+      session.devicesChangedEventStream.listen((event) {
+        if (event.devicesRemoved.any(
+          (device) =>
+              device.type == AudioDeviceType.bluetoothA2dp ||
+              device.type == AudioDeviceType.wiredHeadphones,
+        )) {
+          if (isplaying.value) {
+            globalPause();
+          }
+        }
+      });
+      session.interruptionEventStream.listen((event) {
+        debugPrint('Audio session interruption event: $event');
+      });
+    } catch (e) {
+      logger.e('初始化音频会话失败: $e');
+    }
+  }
+
+  Future<void> updSysVolAndSet() async {
+    if (settingsController.volumnFollowSystem) {
+      await Get.find<PlayController>().getSysVolAndSet();
+    } else {
+      Get.find<PlayController>().currentVolume = 100;
+    }
+  }
+
+  Future<void> getSysVolAndSet() async {
+    try {
+      double? sysVol = await FlutterVolumeController.getVolume();
+      if (sysVol != null) {
+        double t_volume = sysVol * 100.0;
+        _skipForVolChange = true;
+        currentVolume = t_volume;
+      }
+    } catch (e) {
+      logger.e('Error getting system volume: $e');
+    }
+  }
+
   double get currentVolume => _player_settings['volume'] ?? 50.0;
+  bool _skipForVolChange = true;
   set currentVolume(double value) {
     _player_settings['volume'] = value;
-    music_player.setVolume(value);
+    if (settingsController.volumnFollowSystem) {
+      if (_skipForVolChange) {
+        _skipForVolChange = false;
+        return;
+      }
+      setSystemVolume(value);
+    } else {
+      music_player.setVolume(value);
+    }
   }
+
+  void _setShowSystemUI(bool value, Function callback) {
+    FlutterVolumeController.updateShowSystemUI(
+      value,
+    ).then((_) => callback()).catchError((e) {
+      logger.e('Error updating show system UI: $e');
+      callback();
+    });
+  }
+
+  void setSystemVolume(double volume) {
+    final toSet = volume / 100.0;
+    if (settingSystemVolume) {
+      toSetSystemVolume = volume;
+      return;
+    }
+    settingSystemVolume = true;
+    music_player.setVolume(100);
+    _setShowSystemUI(false, () {
+      FlutterVolumeController.setVolume(toSet)
+          .then((_) {
+            _setShowSystemUI(true, () {
+              settingSystemVolume = false;
+              if (toSetSystemVolume != null) {
+                setSystemVolume(toSetSystemVolume!);
+                toSetSystemVolume = null;
+              }
+            });
+          })
+          .catchError((e) {
+            logger.e('Error setting system volume: $e');
+            _setShowSystemUI(true, () {
+              settingSystemVolume = false;
+              if (toSetSystemVolume != null) {
+                setSystemVolume(toSetSystemVolume!);
+                toSetSystemVolume = null;
+              }
+            });
+          });
+    });
+  }
+
+  bool settingSystemVolume = false;
+  double? toSetSystemVolume;
 
   Set<String> get playingIds {
     return currentPlayingRx.map((track) => track.id).toSet();
@@ -144,16 +285,19 @@ class PlayController extends GetxController
   @override
   void onInit() {
     super.onInit();
-    music_player = Player();
+    music_player = Player(
+      configuration: PlayerConfiguration(logLevel: MPVLogLevel.debug),
+    );
+    // (music_player.platform as NativePlayer).setProperty(property, value);
     random = Random(DateTime.now().hashCode);
     // music_player.setAudioDevice()
     logger.d('PlayController initialized');
     logger.d(music_player.state.audioDevices);
     logger.d(music_player.state.audioParams);
-    music_player.stream.error.listen((error) {
-      logger.e('Audio Player Error: $error');
-      logger.d(music_player.state.audioParams);
-    });
+    music_player.stream.error.listen((error) => processMusicPlayerError(error));
+    music_player.stream.log.listen((log) => debugPrint('$log'));
+    // 初始化音频会话（注册蓝牙断开等系统事件监听）
+    _initAudioSession();
     // 初始化播放按钮旋转动画控制器
     playVPlayBtnProcessControllerInit();
     // androidEQEnabled =
@@ -182,18 +326,27 @@ class PlayController extends GetxController
     music_player.stream.playing.listen((event) {
       isplaying.value = event;
     });
-    ever(isplaying, (callback) {
+    interval(isplaying, (callback) {
       broadcastWs();
       updateContinuePlay();
-    });
+    }, time: Duration(milliseconds: 300));
+    debounce(isplaying, (callback) {
+      broadcastWs();
+      updateContinuePlay();
+      AudioSession.instance.then((session) {
+        session.setActive(isplaying.value);
+      });
+    }, time: Duration(milliseconds: 300));
     debounce(showPlayVInlineLyricVisible, (value) {
-      if (value) {
+      if (value && !showPlayVInlineLyricOp.value) {
         showPlayVInlineLyricOp.value = true;
       }
     }, time: Duration(milliseconds: 100));
     debounce(showPlayVInlineLyricOp, (value) {
       if (!value) {
-        showPlayVInlineLyricVisible.value = false;
+        if (showPlayVInlineLyricVisible.value) {
+          showPlayVInlineLyricVisible.value = false;
+        }
       }
     }, time: Duration(milliseconds: 300));
     // 使用 interval 控制任务栏进度更新频率(每500ms最多更新一次)
@@ -234,10 +387,11 @@ class PlayController extends GetxController
 
     // 监听 music_player.position 和 needUpdatePosToAudioService
     // 当两个流都至少更新一次时，更新 updatePosToAudioServiceNow
-    rxdart.Rx.combineLatest2<Duration, int, void>(
+    rxdart.Rx.combineLatest3<Duration, Duration, int, void>(
       music_player.stream.position,
+      music_player.stream.buffer,
       needUpdatePosToAudioService.stream,
-      (position, needUpdate) => null,
+      (position, buffer, needUpdate) => null,
     ).listen((_) {
       updatePosToAudioServiceNow.value++;
       if (updatePosToAudioServiceNow.value > 2e9) {
@@ -310,6 +464,17 @@ class PlayController extends GetxController
         state?.duration = duration;
       });
     });
+    music_player.stream.buffer.listen((buffer) {
+      mediaState.update((state) {
+        state?.buffer = buffer;
+      });
+    });
+    music_player.stream.buffering.listen((buffering) {
+      // 更新 mediaState 的 buffering 状态
+      mediaState.update((state) {
+        state?.buffering = buffering;
+      });
+    });
     if (isWindows) {
       interval(mediaState, (state) {
         smtc.setPlaybackStatus(
@@ -326,10 +491,22 @@ class PlayController extends GetxController
         );
       }, time: Duration(milliseconds: 500));
     }
+    FlutterVolumeController.addListener((volume) {
+      _onSysVolumeChanged(volume);
+    });
+  }
+
+  void _onSysVolumeChanged(double volume) {
+    // debugPrint('Volume changed: $volume');
+    if (!settingsController.volumnFollowSystem) return;
+    _skipForVolChange = true;
+    // if (!globalHorizon) continueshowVolumeSlider();
+    currentVolume = volume * 100.0;
   }
 
   @override
   void onClose() {
+    FlutterVolumeController.removeListener();
     playVPlayBtnProcessController.dispose();
     music_player.dispose();
     super.onClose();
@@ -350,6 +527,7 @@ class PlayController extends GetxController
   /// 目前设想在第一次播放完成前且未获取云端时为true
   bool receivedContinuePlay = false;
   int? toSeek;
+  Rxn<OnlineCacheItem> currentPlayingOnlineCacheItem = Rxn<OnlineCacheItem>();
   Future<void> playsong(
     Track track, {
     bool start = true,
@@ -376,8 +554,9 @@ class PlayController extends GetxController
       }
       nowPlayingTrackRx.value = track;
       add_current_playing([track]);
-      Get.find<NowPlayingPageController>().scrollToCurrentTrack?.call();
-      final tdir = await get_local_cache(track.id);
+      // Get.find<NowPlayingPageController>().scrollToCurrentTrack?.call();
+      final tdir = await Get.find<CacheController>().getLocalCache(track.id);
+
       debugPrint('playsong');
       debugPrint(track.toString());
       debugPrint(tdir);
@@ -387,8 +566,12 @@ class PlayController extends GetxController
         MediaService.bootstrapTrack(track, start: start);
         return;
       }
+      Map<String, String>? httpHeaders = Get.find<CacheController>()
+          .httpHeadersOfOnlineCache(track.id);
+      currentPlayingOnlineCacheItem.value = Get.find<CacheController>()
+          .getLocalCacheOnlineCacheItem(track.id);
       // 有缓存，直接播放
-      Media media = Media(tdir);
+      Media media = Media(tdir, httpHeaders: httpHeaders);
       await music_player.open(media, play: false);
       if (!randommodetemplist.any((element) => element.id == track.id)) {
         if (randomTrackInsertAtHead) {
@@ -404,14 +587,18 @@ class PlayController extends GetxController
       }
 
       Get.find<XLyricController>().loadLyric();
-      double t_volume = 100;
-      try {
-        t_volume = getPlayerSettings("volume");
-      } catch (e) {
-        t_volume = 100;
-        setPlayerSetting("volume", t_volume);
+      if (!settingsController.volumnFollowSystem) {
+        double t_volume = 100;
+        try {
+          t_volume = getPlayerSettings("volume");
+        } catch (e) {
+          t_volume = 100;
+          setPlayerSetting("volume", t_volume);
+        }
+        music_player.setVolume(t_volume);
+      } else {
+        music_player.setVolume(100);
       }
-      music_player.setVolume(t_volume);
       if (toSeek != null) {
         try {
           music_player.stream.duration
@@ -437,6 +624,20 @@ class PlayController extends GetxController
     }
   }
 
+  void processMusicPlayerError(String error) {
+    showErrorSnackbar('播放器错误', error);
+    logger.e('Audio Player Error: $error');
+    logger.d(music_player.state.audioParams);
+    if (error.startsWith('Failed to open') && error.contains('http')) {
+      String? id = currentTrack.id;
+      if (isEmpty(id)) return;
+      cacheController.cleanLocalCache(false, id, true).then((_) {
+        toSeek = mediaState.value.position.inMilliseconds;
+        playsong(currentTrack, start: true);
+      });
+    }
+  }
+
   Future<void> bootstrapTrackSuccess(
     dynamic res,
     Track track, {
@@ -447,7 +648,7 @@ class PlayController extends GetxController
       if (isEmpty(await cacheController.getLocalCache(track.id))) {
         await cacheController.downloadAndCacheFile(res, track, sTrack: sTrack);
       }
-      // 理论上此时应歌曲文件准备完毕
+      // 此时应正在缓存本地文件
       bootStraping.remove(sTrack?.id ?? track.id);
       playsong(
         sTrack ?? track,
@@ -617,6 +818,10 @@ class PlayController extends GetxController
         playsong(nowPlayingTrackRx.value!, start: music_player.state.playing);
       }
     }
+    initSysVolAndSet();
+    setEq().catchError((e) {
+      showErrorSnackbar('设置均衡器失败', e.toString());
+    });
   }
 
   List<Track> get current_playing => currentPlayingRx.toList();
@@ -821,6 +1026,22 @@ class PlayController extends GetxController
     );
   }
 
+  /// Whether a route below the play sheet may handle a back gesture directly.
+  ///
+  /// The play sheet is stacked above the nested navigator instead of being a
+  /// route in it. While the sheet is raised, nested routes must not claim the
+  /// Android predictive-back gesture before the root back coordinator can
+  /// collapse the sheet.
+  bool get canPopInnerRoute {
+    if (globalHorizon) return true;
+
+    final metrics = sheetController.metrics;
+    if (metrics == null) return true;
+
+    const precisionTolerance = 1.0;
+    return metrics.offset <= metrics.minOffset + precisionTolerance;
+  }
+
   bool tryCollapseSheet() {
     if (globalHorizon) return false;
     if ((sheetController.metrics?.offset ?? sheetMinHeight) >
@@ -887,7 +1108,14 @@ class PlayController extends GetxController
         return;
       }
       if (music_player.state.playing) {
-        showInfoSnackbar('其他设备正在播放: ${continuePlay.track.title}', null);
+        showInfoSnackbar(
+          '其他设备正在播放',
+          '${continuePlay.track.title}',
+          onTap: () {
+            toSeek = continuePlay.ext?['pos'] as int?;
+            playsong(continuePlay.track, start: true, isByClick: true);
+          },
+        );
         return;
       }
       toSeek = continuePlay.ext?['pos'] as int?;
@@ -908,6 +1136,20 @@ class PlayController extends GetxController
     songReplaceAdding.value = false;
     if (!Get.find<RouteController>().inSongReplacePage.value) {
       Get.toNamed(RouteName.songReplacePage, id: 1);
+    }
+  }
+
+  Stream<int> get secStr =>
+      mediaState.stream.map((state) => state.position.inSeconds).distinct();
+  StreamSubscription<int>? showTimeInAlbumSub;
+  Future<void> showTimeInAlbum(bool enable) async {
+    if (enable) {
+      await showTimeInAlbumSub?.cancel();
+      showTimeInAlbumSub = secStr.listen((time) {
+        change_playback_state(null, sec: time);
+      });
+    } else {
+      await showTimeInAlbumSub?.cancel();
     }
   }
 }

@@ -1,588 +1,849 @@
-// import 'package:flutter/material.dart';
-// import 'package:get/get.dart';
-// import '../controllers/play_controller.dart';
-// import '../controllers/routeController.dart';
-// import '../controllers/settings_controller.dart';
-// import '../funcs.dart';
-// import '../global_settings_animations.dart';
-// import '../models/AndroidEQBand.dart';
+import 'dart:convert';
 
-// class AndroidEqualizerPage extends StatelessWidget {
-//   const AndroidEqualizerPage({Key? key}) : super(key: key);
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:listen1_xuan/controllers/controllers.dart';
+import 'package:listen1_xuan/funcs.dart';
+import 'package:listen1_xuan/widgets/ext/ext_widget.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:super_sliver_list/super_sliver_list.dart';
 
-//   @override
-//   Widget build(BuildContext context) {
-//     final PlayController playController = Get.find<PlayController>();
-//     final theme = Theme.of(context);
+import '../controllers/settings_controller.dart';
+import '../models/Equalizer/AEqualizer.dart';
+import '../models/Equalizer/EqSetting.dart';
+import '../models/Equalizer/Equalizer.dart';
+import '../models/Equalizer/a.dart' as eq_a;
+import '../models/Equalizer/r.dart' as eq_r;
+import '../models/Equalizer/t.dart';
+import '../settings.dart';
 
-//     return Scaffold(
-//       appBar: AppBar(
-//         title: const Text('音效调节'),
-//         centerTitle: true,
-//         actions: playController.androidEQEnabled
-//             ? [
-//                 // 保存方案按钮
-//                 IconButton(
-//                   icon: const Icon(Icons.save),
-//                   onPressed: () =>
-//                       _showSavePresetDialog(context, playController),
-//                   tooltip: '保存当前方案',
-//                 ),
-//                 // 重置按钮
-//                 IconButton(
-//                   icon: const Icon(Icons.refresh),
-//                   onPressed: () => _showResetDialog(context, playController),
-//                   tooltip: '重置所有频段',
-//                 ),
-//               ]
-//             : [],
-//       ),
-//       body: playController.androidEQEnabled
-//           ? Obx(() {
-//               // 检查是否初始化完成
-//               if (!playController.androidEQInited.value) {
-//                 return globalLoadingAnime;
-//               }
+class AndroidEqualizerPage extends StatefulWidget {
+  const AndroidEqualizerPage({super.key});
 
-//               final bands = playController.bands;
-//               if (bands.isEmpty) {
-//                 return const Center(child: Text('无可用的均衡器频段'));
-//               }
+  @override
+  State<AndroidEqualizerPage> createState() => _AndroidEqualizerPageState();
+}
 
-//               return SingleChildScrollView(
-//                 child: Column(
-//                   children: [
-//                     const SizedBox(height: 20),
-//                     // 频段滑条列表
-//                     Padding(
-//                       padding: const EdgeInsets.symmetric(horizontal: 16),
-//                       child: _buildBandsVisualizer(playController, theme),
-//                     ),
-//                     const SizedBox(height: 20),
-//                     // 已保存的方案列表
-//                     _buildSavedPresets(playController, theme, context),
-//                     const SizedBox(height: 20),
-//                     // 关闭均衡器按钮
-//                     Padding(
-//                       padding: const EdgeInsets.symmetric(horizontal: 16),
-//                       child: SizedBox(
-//                         width: double.infinity,
-//                         child: ElevatedButton.icon(
-//                           onPressed: () async {
-//                             final confirm = await showConfirmDialog(
-//                               '关闭均衡器',
-//                               '确定要关闭均衡器并重启应用吗？',
-//                               confirmLevel: ConfirmLevel.danger,
-//                             );
-//                             if (confirm != true) return;
+class _IndexedBand {
+  final int index;
+  final Equalizer band;
 
-//                             // 禁用均衡器
-//                             Get.find<SettingsController>()
-//                                     .settings[PlayController
-//                                     .androidEQEnabledKey] =
-//                                 false;
+  const _IndexedBand(this.index, this.band);
+}
 
-//                             closeApp();
-//                           },
-//                           icon: const Icon(Icons.power_settings_new),
-//                           label: const Text('关闭均衡器并重启应用'),
-//                           style: ElevatedButton.styleFrom(
-//                             backgroundColor: theme.colorScheme.error,
-//                             foregroundColor: theme.colorScheme.onError,
-//                             padding: const EdgeInsets.symmetric(
-//                               horizontal: 24,
-//                               vertical: 16,
-//                             ),
-//                           ),
-//                         ),
-//                       ),
-//                     ),
-//                     const SizedBox(height: 20),
-//                   ],
-//                 ),
-//               );
-//             })
-//           : Center(
-//               child: ElevatedButton.icon(
-//                 onPressed: () async {
-//                   // 启用均衡器
-//                   Get.find<SettingsController>().settings[PlayController
-//                           .androidEQEnabledKey] =
-//                       true;
-//                   closeApp();
-//                 },
-//                 icon: const Icon(Icons.power_settings_new),
-//                 label: const Text(
-//                   '启用均衡器并重启应用\n均衡器可能在某些设备上不起作用（如小米14A16）',
-//                   maxLines: 3,
-//                 ),
-//                 style: ElevatedButton.styleFrom(
-//                   padding: const EdgeInsets.symmetric(
-//                     horizontal: 24,
-//                     vertical: 16,
-//                   ),
-//                 ),
-//               ),
-//             ),
-//     );
-//   }
+const double _bandCardHeight = 712;
 
-//   // 构建均衡器可视化界面
-//   Widget _buildBandsVisualizer(PlayController playController, ThemeData theme) {
-//     final bands = playController.bands;
-//     final sortedBands = bands.entries.toList()
-//       ..sort((a, b) => a.key.compareTo(b.key));
+class _AndroidEqualizerPageState extends State<AndroidEqualizerPage> {
+  final SettingsController _settingsController = Get.find<SettingsController>();
+  late EqSetting _draftEqSetting;
+  final PlayController _playController = Get.find<PlayController>();
 
-//     return Row(
-//       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-//       crossAxisAlignment: CrossAxisAlignment.end,
-//       children: sortedBands.map((entry) {
-//         final bandIndex = entry.key;
-//         final band = entry.value;
-//         return Expanded(
-//           child: _buildBandSlider(playController, bandIndex, band, theme),
-//         );
-//       }).toList(),
-//     );
-//   }
+  @override
+  void initState() {
+    super.initState();
+    _draftEqSetting = _cloneEqSetting(_settingsController.eqSettingRx.value);
+  }
 
-//   // 构建单个频段滑条
-//   Widget _buildBandSlider(
-//     PlayController playController,
-//     int bandIndex,
-//     AndroidEQBand band,
-//     ThemeData theme,
-//   ) {
-//     // 获取频段参数
-//     final minGain = playController.minGain;
-//     final maxGain = playController.maxGain;
-//     return Padding(
-//       padding: const EdgeInsets.symmetric(horizontal: 4),
-//       child: Column(
-//         mainAxisSize: MainAxisSize.min,
-//         children: [
-//           // 增益值显示
-//           Container(
-//             height: 40,
-//             alignment: Alignment.center,
-//             child: Obx(() {
-//               final currentGain = playController.bands[bandIndex]?.gain ?? 0.0;
-//               return Text(
-//                 '${(currentGain).toStringAsFixed(1)}',
-//                 style: TextStyle(
-//                   fontSize: 12,
-//                   fontWeight: FontWeight.bold,
-//                   color: currentGain == 0
-//                       ? theme.textTheme.bodyMedium?.color?.withOpacity(0.5)
-//                       : theme.primaryColor,
-//                 ),
-//               );
-//             }),
-//           ),
-//           const SizedBox(height: 8),
-//           // 垂直滑条
-//           SizedBox(
-//             height: 200,
-//             child: Obx(() {
-//               final currentGain = playController.bands[bandIndex]?.gain ?? 0.0;
-//               return RotatedBox(
-//                 quarterTurns: 3,
-//                 child: SliderTheme(
-//                   data: SliderThemeData(
-//                     trackHeight: 4,
-//                     thumbShape: const RoundSliderThumbShape(
-//                       enabledThumbRadius: 8,
-//                     ),
-//                     overlayShape: const RoundSliderOverlayShape(
-//                       overlayRadius: 16,
-//                     ),
-//                   ),
-//                   child: Slider(
-//                     value: currentGain.clamp(minGain, maxGain),
-//                     min: minGain,
-//                     max: maxGain,
-//                     divisions: 100,
-//                     onChanged: (value) async {
-//                       playController.setBandGain(bandIndex, value);
-//                     },
-//                   ),
-//                 ),
-//               );
-//             }),
-//           ),
-//           const SizedBox(height: 8),
-//           // 频率显示
-//           SizedBox(
-//             height: 50,
-//             child: Column(
-//               children: [
-//                 Text(
-//                   _formatFrequency(band.centerFrequency),
-//                   style: const TextStyle(
-//                     fontSize: 11,
-//                     fontWeight: FontWeight.w500,
-//                   ),
-//                 ),
-//                 const SizedBox(height: 2),
-//                 Text(
-//                   'Hz',
-//                   style: TextStyle(
-//                     fontSize: 9,
-//                     color: theme.textTheme.bodySmall?.color?.withOpacity(0.5),
-//                   ),
-//                 ),
-//               ],
-//             ),
-//           ),
-//         ],
-//       ),
-//     );
-//   }
+  EqSetting _cloneEqSetting(EqSetting source) {
+    return EqSetting.fromJson(
+      jsonDecode(jsonEncode(source.toJson())) as Map<String, dynamic>,
+    );
+  }
 
-//   // 构建已保存的方案列表
-//   Widget _buildSavedPresets(
-//     PlayController playController,
-//     ThemeData theme,
-//     BuildContext context,
-//   ) {
-//     final settingsController = Get.find<SettingsController>();
-//     final savedPresets =
-//         settingsController.settings['android_equalizer_saves'] as List? ?? [];
+  List<Equalizer> _cloneBands(List<Equalizer> source) {
+    return source
+        .map(
+          (e) => Equalizer.fromJson(
+            jsonDecode(jsonEncode(e.toJson())) as Map<String, dynamic>,
+          ),
+        )
+        .toList();
+  }
 
-//     if (savedPresets.isEmpty) {
-//       return Padding(
-//         padding: const EdgeInsets.symmetric(horizontal: 16),
-//         child: Column(
-//           crossAxisAlignment: CrossAxisAlignment.start,
-//           children: [
-//             Text(
-//               '已保存的方案',
-//               style: TextStyle(
-//                 fontSize: 16,
-//                 fontWeight: FontWeight.bold,
-//                 color: theme.textTheme.titleMedium?.color,
-//               ),
-//             ),
-//             const SizedBox(height: 12),
-//             Container(
-//               padding: const EdgeInsets.all(16),
-//               decoration: BoxDecoration(
-//                 color: theme.cardColor,
-//                 borderRadius: BorderRadius.circular(12),
-//                 border: Border.all(color: theme.dividerColor, width: 1),
-//               ),
-//               child: Center(
-//                 child: Text(
-//                   '暂无保存的方案\n点击右上角保存按钮保存当前设置',
-//                   textAlign: TextAlign.center,
-//                   style: TextStyle(
-//                     fontSize: 14,
-//                     color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
-//                   ),
-//                 ),
-//               ),
-//             ),
-//           ],
-//         ),
-//       );
-//     }
+  void _commitEqSetting(EqSetting next) {
+    _settingsController.eqSetting = next;
+    _settingsController.eqSettingRx.value = next;
+  }
 
-//     return Column(
-//       crossAxisAlignment: CrossAxisAlignment.start,
-//       children: [
-//         Padding(
-//           padding: const EdgeInsets.symmetric(horizontal: 16),
-//           child: Text(
-//             '已保存的方案',
-//             style: TextStyle(
-//               fontSize: 16,
-//               fontWeight: FontWeight.bold,
-//               color: theme.textTheme.titleMedium?.color,
-//             ),
-//           ),
-//         ),
-//         const SizedBox(height: 12),
-//         ListView.builder(
-//           shrinkWrap: true,
-//           physics: const NeverScrollableScrollPhysics(),
-//           padding: const EdgeInsets.symmetric(horizontal: 16),
-//           itemCount: savedPresets.length,
-//           itemBuilder: (context, index) {
-//             final preset = savedPresets[index] as Map<String, dynamic>;
-//             final name = preset['name'] as String;
-//             final gains = (preset['gains'] as List).cast<double>();
+  void _updateEqSetting(void Function(EqSetting next) updater) {
+    final next = _cloneEqSetting(_draftEqSetting);
+    updater(next);
+    setState(() {
+      _draftEqSetting = next;
+    });
+  }
 
-//             return Padding(
-//               padding: const EdgeInsets.only(bottom: 8),
-//               child: Container(
-//                 decoration: BoxDecoration(
-//                   color: theme.cardColor,
-//                   borderRadius: BorderRadius.circular(12),
-//                   border: Border.all(color: theme.dividerColor, width: 1),
-//                 ),
-//                 child: ListTile(
-//                   leading: Icon(Icons.equalizer, color: theme.primaryColor),
-//                   title: Text(name),
-//                   subtitle: Text(_generatePresetSummary(gains)),
-//                   trailing: Row(
-//                     mainAxisSize: MainAxisSize.min,
-//                     children: [
-//                       IconButton(
-//                         icon: const Icon(Icons.delete_outline),
-//                         onPressed: () =>
-//                             _deletePreset(context, playController, index, name),
-//                         tooltip: '删除',
-//                       ),
-//                     ],
-//                   ),
-//                   onTap: () => _applyPreset(playController, gains, name),
-//                 ),
-//               ),
-//             );
-//           },
-//         ),
-//       ],
-//     );
-//   }
+  Future<void> _applyDraftEqSetting() async {
+    _commitEqSetting(_cloneEqSetting(_draftEqSetting));
+    try {
+      await _playController.setEq();
+      showSuccessSnackbar('应用成功', '均衡器设置已应用');
+    } catch (e) {
+      showErrorSnackbar('应用失败', '应用均衡器设置失败');
+    }
+  }
 
-//   // 生成方案摘要（显示增益情况）
-//   String _generatePresetSummary(List<double> gains) {
-//     if (gains.isEmpty) return '无数据';
-//     final avgGain = gains.reduce((a, b) => a + b) / gains.length;
-//     final maxGain = gains.reduce((a, b) => a > b ? a : b);
+  void _updateCurrentPreset(void Function(AEqualizer preset) updater) {
+    _updateEqSetting((next) {
+      final selectedKey = next.nowSelected;
+      if (selectedKey == null) return;
+      final preset = next.equalizers[selectedKey];
+      if (preset == null) return;
+      updater(preset);
+    });
+  }
 
-//     if (avgGain.abs() < 0.1) {
-//       return '平衡音效';
-//     } else if (maxGain > 2 && gains.indexOf(maxGain) < gains.length ~/ 2) {
-//       return '低音增强';
-//     } else if (maxGain > 2 && gains.indexOf(maxGain) > gains.length ~/ 2) {
-//       return '高音增强';
-//     } else {
-//       return '自定义音效';
-//     }
-//   }
+  void _updateBandByActualIndex(
+    int actualIndex,
+    Equalizer Function(Equalizer old) updater,
+  ) {
+    _updateCurrentPreset((preset) {
+      if (actualIndex < 0 || actualIndex >= preset.equalizers.length) return;
+      preset.equalizers[actualIndex] = updater(preset.equalizers[actualIndex]);
+    });
+  }
 
-//   // 显示保存方案对话框
-//   void _showSavePresetDialog(
-//     BuildContext context,
-//     PlayController playController,
-//   ) {
-//     final TextEditingController nameController = TextEditingController();
-//     final RxBool isSaving = false.obs;
+  Future<String?> _showNameDialog({
+    required String title,
+    String initialValue = '',
+    String hintText = '请输入名称',
+  }) async {
+    final controller = TextEditingController(text: initialValue);
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(hintText: hintText),
+          onSubmitted: (_) => Navigator.pop(context, controller.text.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
 
-//     showDialog(
-//       context: context,
-//       builder: (context) => AlertDialog(
-//         title: const Text('保存当前方案'),
-//         content: TextField(
-//           controller: nameController,
-//           decoration: const InputDecoration(
-//             labelText: '方案名称',
-//             hintText: '例如：低音增强、人声突出等',
-//             border: OutlineInputBorder(),
-//           ),
-//           autofocus: true,
-//           maxLength: 20,
-//         ),
-//         actions: [
-//           TextButton(
-//             onPressed: () => Navigator.pop(context),
-//             child: const Text('取消'),
-//           ),
-//           Obx(() {
-//             if (isSaving.value) {
-//               // 保存中显示加载动画
-//               return TextButton(
-//                 onPressed: null, // 禁用按钮
-//                 child: Row(
-//                   mainAxisSize: MainAxisSize.min,
-//                   children: [
-//                     SizedBox(
-//                       width: 16,
-//                       height: 16,
-//                       child: CircularProgressIndicator(
-//                         strokeWidth: 2,
-//                         valueColor: AlwaysStoppedAnimation<Color>(
-//                           Theme.of(context).primaryColor.withOpacity(0.6),
-//                         ),
-//                       ),
-//                     ),
-//                     const SizedBox(width: 8),
-//                     const Text('保存中...'),
-//                   ],
-//                 ),
-//               );
-//             } else {
-//               // 正常状态
-//               return TextButton(
-//                 onPressed: () async {
-//                   final name = nameController.text.trim();
-//                   if (name.isEmpty) {
-//                     showInfoSnackbar('提示', '请输入方案名称');
-//                     return;
-//                   }
+  Future<double?> _showDoubleDialog({
+    required String title,
+    required double current,
+    String hintText = '',
+  }) async {
+    final controller = TextEditingController(text: current.toString());
+    final text = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(hintText: hintText),
+          onSubmitted: (_) => Navigator.pop(context, controller.text.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
 
-//                   // 开始保存
-//                   isSaving.value = true;
+    if (text == null || text.trim().isEmpty) return null;
+    return double.tryParse(text.trim());
+  }
 
-//                   try {
-//                     await _saveCurrentPreset(playController, name);
-//                     Navigator.pop(context);
-//                   } catch (e) {
-//                     showInfoSnackbar('保存失败', e.toString());
-//                   } finally {
-//                     isSaving.value = false;
-//                   }
-//                 },
-//                 child: const Text('保存'),
-//               );
-//             }
-//           }),
-//         ],
-//       ),
-//     );
-//   }
+  Future<int?> _showIntDialog({
+    required String title,
+    required int current,
+    String hintText = '',
+  }) async {
+    final controller = TextEditingController(text: current.toString());
+    final text = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: false),
+          decoration: InputDecoration(hintText: hintText),
+          onSubmitted: (_) => Navigator.pop(context, controller.text.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
 
-//   // 保存当前方案
-//   Future<void> _saveCurrentPreset(
-//     PlayController playController,
-//     String name,
-//   ) async {
-//     final bands = playController.bands;
-//     final sortedBands = bands.entries.toList()
-//       ..sort((a, b) => a.key.compareTo(b.key));
+    if (text == null || text.trim().isEmpty) return null;
+    return int.tryParse(text.trim());
+  }
 
-//     final gains = sortedBands.map((e) => e.value.gain).toList();
+  Future<void> _addBandWithHzInput() async {
+    final hz = await _showIntDialog(
+      title: '添加频段 (Hz)',
+      current: 1000,
+      hintText: '请输入正整数 Hz',
+    );
+    if (hz == null || hz <= 0) return;
 
-//     final settingsController = Get.find<SettingsController>();
-//     final savedPresets =
-//         (settingsController.settings['android_equalizer_saves'] as List?)
-//             ?.cast<Map<String, dynamic>>() ??
-//         [];
+    _updateEqSetting((next) {
+      final selected = next.nowSelected;
+      if (selected == null) return;
+      final preset = next.equalizers[selected];
+      if (preset == null) return;
+      preset.equalizers.add(Equalizer(f: hz));
+    });
+  }
 
-//     // 检查是否已存在同名方案
-//     final existingIndex = savedPresets.indexWhere(
-//       (preset) => preset['name'] == name,
-//     );
+  Future<void> _createPresetFromSource(List<Equalizer> sourceBands) async {
+    final name = await _showNameDialog(title: '新建预设');
+    if (name == null || name.isEmpty) return;
 
-//     if (existingIndex != -1) {
-//       // 更新现有方案
-//       savedPresets[existingIndex] = {
-//         'name': name,
-//         'gains': gains,
-//         'timestamp': DateTime.now().millisecondsSinceEpoch,
-//       };
-//       showInfoSnackbar('已更新', '方案 "$name" 已更新');
-//     } else {
-//       // 添加新方案
-//       savedPresets.add({
-//         'name': name,
-//         'gains': gains,
-//         'timestamp': DateTime.now().millisecondsSinceEpoch,
-//       });
-//       showInfoSnackbar('已保存', '方案 "$name" 已保存');
-//     }
+    _updateEqSetting((next) {
+      if (next.equalizers.containsKey(name)) return;
+      next.equalizers[name] = AEqualizer(equalizers: _cloneBands(sourceBands));
+      next.nowSelected = name;
+    });
+  }
 
-//     settingsController.settings['android_equalizer_saves'] = savedPresets;
-//     await settingsController.saveSettings();
-//   }
+  Future<void> _renamePreset(String oldName) async {
+    final newName = await _showNameDialog(
+      title: '重命名预设',
+      initialValue: oldName,
+    );
+    if (newName == null || newName.isEmpty || newName == oldName) return;
 
-//   // 删除方案
-//   Future<void> _deletePreset(
-//     BuildContext context,
-//     PlayController playController,
-//     int index,
-//     String name,
-//   ) async {
-//     final confirm = await showDialog<bool>(
-//       context: context,
-//       builder: (context) => AlertDialog(
-//         title: const Text('删除方案'),
-//         content: Text('确定要删除方案 "$name" 吗？'),
-//         actions: [
-//           TextButton(
-//             onPressed: () => Navigator.pop(context, false),
-//             child: const Text('取消'),
-//           ),
-//           TextButton(
-//             onPressed: () => Navigator.pop(context, true),
-//             child: const Text('删除'),
-//           ),
-//         ],
-//       ),
-//     );
+    _updateEqSetting((next) {
+      if (!next.equalizers.containsKey(oldName) ||
+          next.equalizers.containsKey(newName)) {
+        return;
+      }
+      final preset = next.equalizers.remove(oldName);
+      if (preset == null) return;
+      next.equalizers[newName] = preset;
+      if (next.nowSelected == oldName) {
+        next.nowSelected = newName;
+      }
+    });
+  }
 
-//     if (confirm != true) return;
+  Future<void> _copyPreset(String sourceName) async {
+    final copyName = await _showNameDialog(
+      title: '复制预设',
+      initialValue: '${sourceName}_copy',
+      hintText: '请输入新名称',
+    );
+    if (copyName == null || copyName.isEmpty) return;
 
-//     final settingsController = Get.find<SettingsController>();
-//     final savedPresets =
-//         (settingsController.settings['android_equalizer_saves'] as List?)
-//             ?.cast<Map<String, dynamic>>() ??
-//         [];
+    _updateEqSetting((next) {
+      if (next.equalizers.containsKey(copyName)) return;
+      final source = next.equalizers[sourceName];
+      if (source == null) return;
+      next.equalizers[copyName] = AEqualizer(
+        equalizers: _cloneBands(source.equalizers),
+      );
+      next.nowSelected = copyName;
+    });
+  }
 
-//     savedPresets.removeAt(index);
-//     settingsController.settings['android_equalizer_saves'] = savedPresets;
-//     await settingsController.saveSettings();
+  Future<void> _deletePreset(String name) async {
+    final shouldDelete =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('删除预设'),
+            content: Text('确定删除预设 "$name" 吗？'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('删除'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
 
-//     showInfoSnackbar('已删除', '方案 "$name" 已删除');
-//   }
+    if (!shouldDelete) return;
 
-//   // 格式化频率显示
-//   String _formatFrequency(double? frequency) {
-//     if (frequency == null) return '0';
-//     if (frequency >= 1000) {
-//       return '${(frequency / 1000).toStringAsFixed(1)}k';
-//     }
-//     return frequency.toInt().toString();
-//   }
+    _updateEqSetting((next) {
+      next.equalizers.remove(name);
+      if (next.equalizers.isEmpty) {
+        next.equalizers['flat'] = AEqualizer(equalizers: [Equalizer(f: 1000)]);
+      }
+      if (next.nowSelected == name) {
+        next.nowSelected = null;
+      }
+    });
+  }
 
-//   // 应用预设方案
-//   Future<void> _applyPreset(
-//     PlayController playController,
-//     List<double> gains,
-//     String presetName,
-//   ) async {
-//     final bands = playController.bands;
-//     final sortedBands = bands.keys.toList()..sort();
+  Future<void> _showPresetActions(String name) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline),
+              title: const Text('重命名'),
+              onTap: () async {
+                Navigator.pop(context);
+                await _renamePreset(name);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy_outlined),
+              title: const Text('复制'),
+              onTap: () async {
+                Navigator.pop(context);
+                await _copyPreset(name);
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.delete_outline,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              title: Text(
+                '删除',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+                await _deletePreset(name);
+              },
+            ),
+            12.sbh,
+          ],
+        );
+      },
+    );
+  }
 
-//     for (int i = 0; i < sortedBands.length && i < gains.length; i++) {
-//       final bandIndex = sortedBands[i];
-//       playController.setBandGain(bandIndex, gains[i]);
-//     }
+  List<_IndexedBand> _sortedBands(AEqualizer preset) {
+    final indexed = preset.equalizers
+        .asMap()
+        .entries
+        .map((e) => _IndexedBand(e.key, e.value))
+        .toList();
+    indexed.sort((a, b) => a.band.f.compareTo(b.band.f));
+    return indexed;
+  }
 
-//     showInfoSnackbar('已应用方案', presetName);
-//   }
+  Widget _buildPresetWrap(EqSetting eqSetting) {
+    final keys = eqSetting.equalizers.keys.toList();
+    final selected = eqSetting.nowSelected;
 
-//   // 显示重置确认对话框
-//   void _showResetDialog(BuildContext context, PlayController playController) {
-//     showDialog(
-//       context: context,
-//       builder: (context) => AlertDialog(
-//         title: const Text('重置均衡器'),
-//         content: const Text('确定要将所有频段重置为 0 吗？'),
-//         actions: [
-//           TextButton(
-//             onPressed: () => Navigator.pop(context),
-//             child: const Text('取消'),
-//           ),
-//           TextButton(
-//             onPressed: () async {
-//               Navigator.pop(context);
-//               await _resetAllBands(playController);
-//               showInfoSnackbar('已重置', '所有频段已恢复默认值');
-//             },
-//             child: const Text('确定'),
-//           ),
-//         ],
-//       ),
-//     );
-//   }
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: keys.map((name) {
+        final isSelected = selected == name;
+        return GestureDetector(
+          onLongPress: () => _showPresetActions(name),
+          child: ChoiceChip(
+            label: Text(name),
+            selected: isSelected,
+            showCheckmark: false,
+            onSelected: (_) {
+              _updateEqSetting((next) {
+                if (next.nowSelected == name) {
+                  next.nowSelected = null;
+                } else {
+                  next.nowSelected = name;
+                }
+              });
+            },
+          ),
+        );
+      }).toList(),
+    );
+  }
 
-//   // 重置所有频段
-//   Future<void> _resetAllBands(PlayController playController) async {
-//     final bands = playController.bands;
-//     for (final bandIndex in bands.keys) {
-//       playController.setBandGain(bandIndex, 0.0);
-//     }
-//   }
-// }
+  Widget _buildAConfig(dynamic intOrDouble, String label, {bool? isMod2}) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
+      width: 48,
+      decoration: BoxDecoration(
+        color: isMod2 != true
+            ? colorScheme.surfaceContainerHighest
+            : colorScheme.surfaceContainer.withAlpha(128),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          4.sbh,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              intOrDouble is int
+                  ? '$intOrDouble'
+                  : (intOrDouble as double?)?.toStringAsFixed(2) ?? '-',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: colorScheme.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactSelectConfig<T>({
+    required String label,
+    required T? value,
+    required List<DropdownMenuItem<T>> items,
+    required ValueChanged<T?> onChanged,
+    bool? isMod2,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 48,
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
+      decoration: BoxDecoration(
+        color: isMod2 != true
+            ? colorScheme.surfaceContainerHighest
+            : colorScheme.surfaceContainer.withAlpha(128),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          4.sbh,
+          FittedBox(
+              fit: BoxFit.scaleDown,
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<T>(
+                  value: value,
+                  isDense: true,
+                  iconSize: 16,
+                  onChanged: onChanged,
+                  items: items,
+                ),
+              ),
+            ).sbh(30),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBandColumn(_IndexedBand item, {bool isMod2 = false}) {
+    final band = item.band;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      width: 48,
+      height: _bandCardHeight,
+      margin: const EdgeInsets.only(right: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: isMod2 != true
+            ? colorScheme.surfaceContainer.withAlpha(128)
+            : null,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () async {
+              final value = await _showIntDialog(
+                title: '设置 f (Hz)',
+                current: band.f,
+                hintText: '请输入正整数',
+              );
+              if (value == null || value <= 0) return;
+              _updateBandByActualIndex(
+                item.index,
+                (old) => old.copyWith(f: value),
+              );
+            },
+            child: _buildAConfig(
+              band.f,
+              'f (Hz)',
+              isMod2: !isMod2 ? false : true,
+            ),
+          ),
+          16.sbh,
+          RotatedBox(
+              quarterTurns: 3,
+              child: Slider(
+                padding: const EdgeInsets.all(0),
+                activeColor: colorScheme.secondaryContainer,
+                inactiveColor: colorScheme.surfaceContainer,
+                value: band.g.clamp(-12.0, 12.0),
+                min: -12,
+                max: 12,
+                onChanged: (v) {
+                  _updateBandByActualIndex(
+                    item.index,
+                    (old) => old.copyWith(g: v),
+                  );
+                },
+              ),
+            ).sbh(180),
+          16.sbh,
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () async {
+              final value = await _showDoubleDialog(
+                title: '设置 g (dB)',
+                current: band.g,
+              );
+              if (value == null) return;
+              _updateBandByActualIndex(
+                item.index,
+                (old) => old.copyWith(g: value),
+              );
+            },
+            child: _buildAConfig(
+              band.g,
+              'g (dB)',
+              isMod2: isMod2 ? false : true,
+            ),
+          ),
+          8.sbh,
+          _buildCompactSelectConfig<WidthType>(
+            label: 't',
+            value: band.t,
+            isMod2: isMod2,
+            items: WidthType.values
+                .map(
+                  (type) => DropdownMenuItem<WidthType>(
+                    value: type,
+                    child: Text(type.value),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value == null) return;
+              _updateBandByActualIndex(
+                item.index,
+                (old) => old.copyWith(t: value),
+              );
+            },
+          ),
+          8.sbh,
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () async {
+              final value = await _showDoubleDialog(
+                title: '设置 w (width)',
+                current: band.w,
+              );
+              if (value == null || value <= 0) return;
+              _updateBandByActualIndex(
+                item.index,
+                (old) => old.copyWith(w: value),
+              );
+            },
+            child: _buildAConfig(
+              band.w,
+              'w (width)',
+              isMod2: isMod2 ? false : true,
+            ),
+          ),
+          8.sbh,
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () async {
+              final current = band.m ?? 1.0;
+              final value = await _showDoubleDialog(
+                title: '设置 m (mix)',
+                current: current,
+                hintText: '输入 0~1',
+              );
+              if (value == null) return;
+              _updateBandByActualIndex(
+                item.index,
+                (old) => old.copyWith(m: value.clamp(0.0, 1.0).toDouble()),
+              );
+            },
+            child: _buildAConfig(
+              band.m,
+              'm (mix)',
+              isMod2: !isMod2 ? false : true,
+            ),
+          ),
+          8.sbh,
+          _buildCompactSelectConfig<eq_a.Transform?>(
+            label: 'a',
+            value: band.a,
+            isMod2: isMod2 ? false : true,
+
+            items: <DropdownMenuItem<eq_a.Transform?>>[
+              const DropdownMenuItem<eq_a.Transform?>(
+                value: null,
+                child: Text('-'),
+              ),
+              ...eq_a.Transform.values.map(
+                (type) => DropdownMenuItem<eq_a.Transform?>(
+                  value: type,
+                  child: Text(type.value),
+                ),
+              ),
+            ],
+            onChanged: (value) {
+              _updateBandByActualIndex(item.index, (old) {
+                old.a = value;
+                return old;
+              });
+            },
+          ),
+          8.sbh,
+          _buildCompactSelectConfig<eq_r.Precision?>(
+            label: 'r',
+            value: band.r,
+            isMod2: !isMod2 ? false : true,
+
+            items: <DropdownMenuItem<eq_r.Precision?>>[
+              const DropdownMenuItem<eq_r.Precision?>(
+                value: null,
+                child: Text('-'),
+              ),
+              ...eq_r.Precision.values.map(
+                (type) => DropdownMenuItem<eq_r.Precision?>(
+                  value: type,
+                  child: Text(type.value),
+                ),
+              ),
+            ],
+            onChanged: (value) {
+              _updateBandByActualIndex(item.index, (old) {
+                old.r = value;
+                return old;
+              });
+            },
+          ),
+          8.sbh,
+          IconButton.filledTonal(
+            onPressed: () {
+              _updateCurrentPreset((preset) {
+                if (preset.equalizers.length <= 1) return;
+                preset.equalizers.removeAt(item.index);
+              });
+            },
+            icon: const Icon(Icons.delete_outline),
+            color: colorScheme.error,
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('均衡器设置'),
+        actions: [
+          IconButton(
+            onPressed: () {
+              showConfirmDialog(
+                '重置均衡器',
+                '确定要重置均衡器设置吗？',
+                confirmLevel: ConfirmLevel.danger,
+              ).then((confirmed) {
+                if (confirmed) {
+                  setState(() {
+                    _draftEqSetting = EqSetting();
+                  });
+                  _applyDraftEqSetting();
+                }
+              });
+            },
+            icon: const Icon(Icons.restart_alt_rounded),
+          ),
+          IconButton(
+            onPressed: () {
+              g_launchURL(
+                Uri.parse('https://ffmpeg.org/ffmpeg-filters.html#equalizer'),
+              );
+            },
+            icon: const Icon(Icons.help_outline_rounded),
+          ),
+          IconButton(
+            onPressed: _applyDraftEqSetting,
+            icon: const Icon(Icons.check),
+          ),
+        ],
+      ),
+
+      body: Builder(
+        builder: (context) {
+          final eqSetting = _draftEqSetting;
+
+          return SuperListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            children: [
+              Text(
+                '当前设置',
+                style: TextStyle(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                ),
+              ),
+              Card(
+                margin: const EdgeInsets.only(top: 8),
+                child: Obx(() => Text(_playController.nowEq.value)),
+              ),
+              10.sbh,
+              Text(
+                '预设',
+                style: TextStyle(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                ),
+              ),
+              10.sbh,
+              _buildPresetWrap(eqSetting),
+              8.sbh,
+              FilledButton.tonalIcon(
+                onPressed: () {
+                  final selected = eqSetting.nowSelected;
+                  final source = selected == null
+                      ? null
+                      : eqSetting.equalizers[selected];
+                  final bands = source?.equalizers ?? [Equalizer(f: 1000)];
+                  _createPresetFromSource(bands);
+                },
+                icon: const Icon(Icons.library_add_outlined),
+                label: const Text('新建预设'),
+              ),
+              if (eqSetting.nowSelected != null) ...[
+                16.sbh,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '当前预设参数',
+                        style: TextStyle(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 18,
+                        ),
+                        maxLines: 1,
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _addBandWithHzInput,
+                      icon: const Icon(Icons.add),
+                      label: const Text('添加频段'),
+                    ),
+                  ],
+                ),
+                8.sbh,
+                Builder(
+                  builder: (context) {
+                    final selected = eqSetting.nowSelected;
+                    if (selected == null) {
+                      return Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerLow,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text('未选中预设。点击上方预设即可进入编辑，点击已选中预设可取消选中。'),
+                      );
+                    }
+
+                    final preset = eqSetting.equalizers[selected];
+                    if (preset == null) {
+                      return const Text('当前选中预设不存在');
+                    }
+                    final sorted = _sortedBands(preset);
+                    return SuperListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemBuilder: (context, index) {
+                          final item = sorted[index];
+                          return _buildBandColumn(item, isMod2: index % 2 == 0);
+                        },
+                        itemCount: sorted.length,
+                      ).sbh(_bandCardHeight);
+                  },
+                ),
+                16.sbh,
+                Text(
+                  '命令预览',
+                  style: TextStyle(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                  ),
+                ),
+                8.sbh,
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: SelectableText(
+                    eqSetting.toFilterStringOfNowSelected() ?? '未选中预设',
+                    style: TextStyle(color: colorScheme.onSurfaceVariant),
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}

@@ -1,17 +1,22 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide CircularProgressIndicator;
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:get/get.dart';
 import 'package:listen1_xuan/settings.dart';
+import 'package:listen1_xuan/widgets/ext/ext_widget.dart';
+import '../widgets/progress_indicator_xuan.dart';
 
+import 'controllers/appLinksController.dart';
 import 'controllers/settings_controller.dart';
 import 'global_settings_animations.dart';
-import 'widgets/smooth_sheet_toast.dart';
+import 'widgets/draggable_toast/draggable_toast.dart';
 
 late FToast fToast;
-late SmoothSheetToast smoothSheetToast;
+late ToastOverlayManager draggableToastManager;
 
 /// 创建统一的自定义 Toast 组件
 Widget _buildCustomToast({
@@ -21,38 +26,43 @@ Widget _buildCustomToast({
   required String? message,
   required Color backgroundColor,
   required Color textColor,
+  VoidCallback? onTap,
 }) {
   return LayoutBuilder(
     builder: (context, constraints) {
       // 计算最大宽度：屏幕宽度 - 两侧各64的margin
       final maxWidth = MediaQuery.of(context).size.width - 128;
 
-      return Container(
-        constraints: BoxConstraints(maxWidth: maxWidth),
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12.0),
-          color: backgroundColor,
-        ),
-        child: IntrinsicWidth(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: iconColor, size: 24),
-              const SizedBox(width: 12),
-              Flexible(
-                child: Text(
-                  "${title ?? ''}${(!isEmpty(title) && !isEmpty(message)) ? '：' : ''}${message ?? ''}",
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w400,
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12.0),
+            color: backgroundColor,
+          ),
+          child: IntrinsicWidth(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: iconColor, size: 24),
+                12.sbw,
+                Flexible(
+                  child: Text(
+                    "${title ?? ''}${(!isEmpty(title) && !isEmpty(message)) ? '：' : ''}${message ?? ''}",
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w400,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: null,
                   ),
-                  textAlign: TextAlign.center,
-                  maxLines: null,
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );
@@ -68,6 +78,7 @@ void _showCustomToast({
   required String? message,
   required Color backgroundColor,
   required Color textColor,
+  VoidCallback? onTap,
 }) {
   try {
     fToast.removeCustomToast();
@@ -79,6 +90,7 @@ void _showCustomToast({
         message: message,
         backgroundColor: backgroundColor,
         textColor: textColor,
+        onTap: onTap,
       );
 
       fToast.showToast(
@@ -106,8 +118,11 @@ void showErrorSnackbar(
   String? title,
   String? message, {
   SnackPosition snackPosition = SnackPosition.TOP,
+  VoidCallback? onTap,
 }) {
-  Clipboard.setData(ClipboardData(text: message ?? title ?? ''));
+  if (Get.find<SettingsController>().copyErrorMessage) {
+    Clipboard.setData(ClipboardData(text: message ?? title ?? ''));
+  }
   debugPrint("Showing error toast: $title - $message");
   _showCustomToast(
     icon: Icons.cancel,
@@ -116,6 +131,7 @@ void showErrorSnackbar(
     message: message,
     backgroundColor: Get.theme.colorScheme.errorContainer,
     textColor: Get.theme.colorScheme.onErrorContainer,
+    onTap: onTap,
   );
 }
 
@@ -123,6 +139,7 @@ void showWarningSnackbar(
   String? title,
   String? message, {
   SnackPosition snackPosition = SnackPosition.TOP,
+  VoidCallback? onTap,
 }) {
   debugPrint("Showing warning toast: $title - $message");
   _showCustomToast(
@@ -132,6 +149,7 @@ void showWarningSnackbar(
     message: message,
     backgroundColor: Get.theme.colorScheme.secondaryContainer,
     textColor: Get.theme.colorScheme.onSecondaryContainer,
+    onTap: onTap,
   );
 }
 
@@ -139,6 +157,7 @@ void showInfoSnackbar(
   String? title,
   String? message, {
   SnackPosition snackPosition = SnackPosition.TOP,
+  VoidCallback? onTap,
 }) {
   debugPrint("Showing info toast: $title - $message");
   _showCustomToast(
@@ -148,6 +167,7 @@ void showInfoSnackbar(
     message: message,
     backgroundColor: Get.theme.colorScheme.primaryContainer,
     textColor: Get.theme.colorScheme.onPrimaryContainer,
+    onTap: onTap,
   );
 }
 
@@ -155,6 +175,7 @@ void showSuccessSnackbar(
   String? title,
   String? message, {
   SnackPosition snackPosition = SnackPosition.TOP,
+  VoidCallback? onTap,
 }) {
   debugPrint("Showing success toast: $title - $message");
   _showCustomToast(
@@ -164,6 +185,7 @@ void showSuccessSnackbar(
     message: message,
     backgroundColor: Get.theme.colorScheme.tertiaryContainer,
     textColor: Get.theme.colorScheme.onTertiaryContainer,
+    onTap: onTap,
   );
 }
 
@@ -171,9 +193,16 @@ void showDebugSnackbar(
   String? title,
   String? message, {
   SnackPosition snackPosition = SnackPosition.TOP,
+  VoidCallback? onTap,
 }) {
   logger.d("Debug Toast - $title: $message");
   if (Get.find<SettingsController>().useDebugMode || kDebugMode) {
+    Clipboard.setData(
+      ClipboardData(
+        text:
+            '${title ?? ''}${(!isEmpty(title) && !isEmpty(message)) ? '：' : ''}${message ?? ''}',
+      ),
+    );
     _showCustomToast(
       icon: Icons.bug_report_rounded,
       iconColor: Get.theme.colorScheme.tertiary,
@@ -181,20 +210,22 @@ void showDebugSnackbar(
       message: message,
       backgroundColor: Get.theme.colorScheme.tertiaryContainer,
       textColor: Get.theme.colorScheme.onTertiaryContainer,
+      onTap: onTap,
     );
   }
 }
 
 void showLoadingDialog(RxString message) {
   Get.dialog(
-    WillPopScope(
-      onWillPop: () async => false, // 禁止关闭对话框
+    PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async => false, // 禁止关闭对话框
       child: AlertDialog(
         content: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const CircularProgressIndicator(strokeWidth: 4),
-            const SizedBox(width: 20),
+            globalLoadingAnime,
+            20.sbw,
             Obx(
               () => Text(message.value, style: const TextStyle(fontSize: 16)),
             ),
@@ -258,6 +289,189 @@ Future<bool> showConfirmDialog(
   return result ?? false;
 }
 
+class _InputDialogWidget extends StatefulWidget {
+  final String title;
+  final String? message;
+  final String? initialValue;
+  final String? placeholder;
+  final TextInputType keyboardType;
+  final int maxLines;
+  final int? maxLength;
+  final String? Function(String?)? validator;
+  final Future<bool> Function(String value)? onConfirm;
+  final String confirmText;
+  final String cancelText;
+
+  const _InputDialogWidget({
+    required this.title,
+    this.message,
+    this.initialValue,
+    this.placeholder,
+    this.keyboardType = TextInputType.text,
+    this.maxLines = 1,
+    this.maxLength,
+    this.validator,
+    this.onConfirm,
+    required this.confirmText,
+    required this.cancelText,
+  });
+
+  @override
+  State<_InputDialogWidget> createState() => _InputDialogWidgetState();
+}
+
+class _InputDialogWidgetState extends State<_InputDialogWidget> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+  final _errorMessage = RxnString();
+  final _isProcessing = false.obs;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+    _focusNode = FocusNode();
+    _focusNode.addListener(_focusListener);
+  }
+
+  void _focusListener() {
+    if (_focusNode.hasFocus) {
+      setInAppHotKeyEnable(false);
+    } else {
+      setInAppHotKeyEnable(true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_focusListener);
+    setInAppHotKeyEnable(true);
+    _controller.dispose();
+    _focusNode.dispose();
+    _errorMessage.close();
+    _isProcessing.close();
+    super.dispose();
+  }
+
+  Future<void> _handleConfirm() async {
+    final value = _controller.text;
+
+    // 执行验证
+    if (widget.validator != null) {
+      final error = widget.validator!(value);
+      if (error != null) {
+        _errorMessage.value = error;
+        return;
+      }
+    }
+
+    // 执行确认回调
+    if (widget.onConfirm != null) {
+      try {
+        _isProcessing.value = true;
+        final canClose = await widget.onConfirm!(value);
+        _isProcessing.value = false;
+
+        if (canClose) {
+          Get.back(result: value);
+        }
+        // 如果返回false，对话框保持打开状态
+      } catch (e) {
+        _isProcessing.value = false;
+        _errorMessage.value = '处理失败: ${e.toString()}';
+      }
+    } else {
+      // 没有回调函数，直接关闭
+      Get.back(result: value);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async => false,
+      child: AlertDialog(
+        title: Text(widget.title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (widget.message != null) ...[
+              Text(
+                widget.message!,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Get.theme.textTheme.bodySmall?.color,
+                ),
+              ),
+              16.sbh,
+            ],
+            Obx(
+              () => TextField(
+                controller: _controller,
+                keyboardType: widget.keyboardType,
+                maxLines: widget.maxLines,
+                maxLength: widget.maxLength,
+                focusNode: _focusNode,
+                autofocus: true,
+                enabled: !_isProcessing.value,
+                decoration: InputDecoration(
+                  hintText: widget.placeholder,
+                  errorText: _errorMessage.value,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  counterText: widget.maxLength != null ? null : '',
+                ),
+                onChanged: (value) {
+                  // 输入时清除错误消息
+                  if (_errorMessage.value != null) {
+                    _errorMessage.value = null;
+                  }
+                },
+                onSubmitted: (value) async {
+                  // 按回车键提交（仅限单行输入）
+                  if (widget.maxLines == 1 && !_isProcessing.value) {
+                    await _handleConfirm();
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          Obx(
+            () => TextButton(
+              onPressed: _isProcessing.value
+                  ? null
+                  : () => Get.back(result: null),
+              child: Text(widget.cancelText),
+            ),
+          ),
+          Obx(
+            () => ElevatedButton(
+              onPressed: _isProcessing.value
+                  ? null
+                  : () async {
+                      await _handleConfirm();
+                    },
+              child: _isProcessing.value
+                  ? CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Get.theme.colorScheme.onPrimary,
+                      ),
+                    ).sbs(16)
+                  : Text(widget.confirmText),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 显示文本输入对话框
 ///
 /// [title] 对话框标题
@@ -271,6 +485,7 @@ Future<bool> showConfirmDialog(
 /// [onConfirm] 确认回调函数，返回true表示可以关闭对话框，false表示保持打开
 /// [confirmText] 确认按钮文本
 /// [cancelText] 取消按钮文本
+/// [disableBackgroundShadow] 是否禁用对话框背景遮罩阴影（默认 false）
 ///
 /// 返回用户输入的文本，如果取消则返回null
 Future<String?> showInputDialog({
@@ -285,174 +500,24 @@ Future<String?> showInputDialog({
   Future<bool> Function(String value)? onConfirm,
   String confirmText = '确定',
   String cancelText = '取消',
+  bool disableBackgroundShadow = false,
 }) async {
-  final controller = TextEditingController(text: initialValue);
-  final errorMessage = RxnString();
-  final isProcessing = false.obs;
-  final focusNode = FocusNode();
-
-  // 定义焦点监听器
-  void focusListener() {
-    if (focusNode.hasFocus) {
-      set_inapp_hotkey(false);
-    } else {
-      set_inapp_hotkey(true);
-    }
-  }
-
-  focusNode.addListener(focusListener);
-
-  try {
-    String? result = await Get.dialog<String>(
-      WillPopScope(
-        onWillPop: () async => !isProcessing.value,
-        child: AlertDialog(
-          title: Text(title),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (message != null) ...[
-                Text(
-                  message,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Get.theme.textTheme.bodySmall?.color,
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-              Obx(
-                () => TextField(
-                  controller: controller,
-                  keyboardType: keyboardType,
-                  maxLines: maxLines,
-                  maxLength: maxLength,
-                  focusNode: focusNode,
-                  autofocus: true,
-                  enabled: !isProcessing.value,
-                  decoration: InputDecoration(
-                    hintText: placeholder,
-                    errorText: errorMessage.value,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    counterText: maxLength != null ? null : '',
-                  ),
-                  onChanged: (value) {
-                    // 输入时清除错误消息
-                    if (errorMessage.value != null) {
-                      errorMessage.value = null;
-                    }
-                  },
-                  onSubmitted: (value) async {
-                    // 按回车键提交（仅限单行输入）
-                    if (maxLines == 1 && !isProcessing.value) {
-                      await _handleConfirm(
-                        controller,
-                        validator,
-                        onConfirm,
-                        errorMessage,
-                        isProcessing,
-                      );
-                    }
-                  },
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            Obx(
-              () => TextButton(
-                onPressed: isProcessing.value
-                    ? null
-                    : () => Get.back(result: null),
-                child: Text(cancelText),
-              ),
-            ),
-            Obx(
-              () => ElevatedButton(
-                onPressed: isProcessing.value
-                    ? null
-                    : () async {
-                        await _handleConfirm(
-                          controller,
-                          validator,
-                          onConfirm,
-                          errorMessage,
-                          isProcessing,
-                        );
-                      },
-                child: isProcessing.value
-                    ? SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Get.theme.colorScheme.onPrimary,
-                          ),
-                        ),
-                      )
-                    : Text(confirmText),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    return result;
-  } finally {
-    // 先移除监听器，再 dispose，避免 "used after being disposed" 错误
-    focusNode.removeListener(focusListener);
-    set_inapp_hotkey(true);
-
-    // 延迟 dispose，确保对话框动画完成
-    await Future.delayed(Duration(milliseconds: 100));
-    controller.dispose();
-    focusNode.dispose();
-  }
-}
-
-/// 处理输入确认逻辑
-Future<void> _handleConfirm(
-  TextEditingController controller,
-  String? Function(String?)? validator,
-  Future<bool> Function(String value)? onConfirm,
-  RxnString errorMessage,
-  RxBool isProcessing,
-) async {
-  final value = controller.text;
-
-  // 执行验证
-  if (validator != null) {
-    final error = validator(value);
-    if (error != null) {
-      errorMessage.value = error;
-      return;
-    }
-  }
-
-  // 执行确认回调
-  if (onConfirm != null) {
-    try {
-      isProcessing.value = true;
-      final canClose = await onConfirm(value);
-      isProcessing.value = false;
-
-      if (canClose) {
-        Get.back(result: value);
-      }
-      // 如果返回false，对话框保持打开状态
-    } catch (e) {
-      isProcessing.value = false;
-      errorMessage.value = '处理失败: ${e.toString()}';
-    }
-  } else {
-    // 没有回调函数，直接关闭
-    Get.back(result: value);
-  }
+  return Get.dialog<String>(
+    _InputDialogWidget(
+      title: title,
+      message: message,
+      initialValue: initialValue,
+      placeholder: placeholder,
+      keyboardType: keyboardType,
+      maxLines: maxLines,
+      maxLength: maxLength,
+      validator: validator,
+      onConfirm: onConfirm,
+      confirmText: confirmText,
+      cancelText: cancelText,
+    ),
+    barrierColor: disableBackgroundShadow ? Colors.transparent : null,
+  );
 }
 
 bool isEmpty(dynamic str) {
@@ -471,6 +536,8 @@ bool isEmpty(dynamic str) {
   // }
   return str == null;
 }
+
+bool isNotEmpty(dynamic str) => !isEmpty(str);
 
 /// 将字节数格式化为可读的字符串
 ///
@@ -539,7 +606,7 @@ Future<bool?> showTriStateConfirmDialog({
   String rejectText = '拒绝',
   String cancelText = '取消',
   String rememberText = '记住我的选择',
-  bool autoRem=false,
+  bool autoRem = false,
   ConfirmLevel confirmLevel = ConfirmLevel.info,
 }) async {
   // 如果当前值非 null，直接返回
@@ -547,7 +614,7 @@ Future<bool?> showTriStateConfirmDialog({
     return currentValue;
   }
 
-  final rememberChoice =autoRem ? true.obs : false.obs;
+  final rememberChoice = autoRem ? true.obs : false.obs;
 
   ButtonStyle getButtonStyle(ConfirmLevel level) {
     switch (level) {
@@ -569,6 +636,9 @@ Future<bool?> showTriStateConfirmDialog({
     }
   }
 
+  if (isDesktop) {
+    Get.find<Applinkscontroller>().xshow?.call();
+  }
   bool? result = await Get.dialog<bool?>(
     AlertDialog(
       title: Text(title),
@@ -577,7 +647,7 @@ Future<bool?> showTriStateConfirmDialog({
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(message),
-          const SizedBox(height: 16),
+          16.sbh,
           Obx(
             () => CheckboxListTile(
               title: Text(rememberText),
@@ -623,4 +693,14 @@ Future<bool?> showTriStateConfirmDialog({
   );
 
   return result;
+}
+
+/// 获取粘贴文件保存目录
+Future<String> getPasteFileDownloadDir() async {
+  final dir = (await xuanGetdownloadDirectory()) as Directory;
+  final pasteDir = dir.parent;
+  if (!await pasteDir.exists()) {
+    await pasteDir.create(recursive: true);
+  }
+  return pasteDir.path;
 }

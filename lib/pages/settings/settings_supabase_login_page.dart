@@ -1,9 +1,11 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide CircularProgressIndicator;
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:listen1_xuan/controllers/supabase_auth_controller.dart';
 import 'package:listen1_xuan/controllers/routeController.dart';
 import 'package:listen1_xuan/funcs.dart';
+import 'package:listen1_xuan/widgets/ext/ext_widget.dart';
+import 'package:listen1_xuan/widgets/progress_indicator_xuan.dart';
 
 import '../../global_settings_animations.dart';
 
@@ -47,16 +49,16 @@ class _SupabaseLoginPageState extends State<SupabaseLoginPage> {
 
     _focusNode.addListener(() {
       if (_focusNode.hasFocus) {
-        set_inapp_hotkey(false);
+        setInAppHotKeyEnable(false);
       } else {
-        set_inapp_hotkey(true);
+        setInAppHotKeyEnable(true);
       }
     });
     _focusNode2.addListener(() {
       if (_focusNode2.hasFocus) {
-        set_inapp_hotkey(false);
+        setInAppHotKeyEnable(false);
       } else {
-        set_inapp_hotkey(true);
+        setInAppHotKeyEnable(true);
       }
     });
   }
@@ -84,9 +86,9 @@ class _SupabaseLoginPageState extends State<SupabaseLoginPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 20),
+            20.sbh,
             const Icon(Icons.email, size: 80, color: Colors.blue),
-            const SizedBox(height: 40),
+            40.sbh,
             TextFormField(
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
@@ -110,7 +112,7 @@ class _SupabaseLoginPageState extends State<SupabaseLoginPage> {
                 return null;
               },
             ),
-            const SizedBox(height: 20),
+            20.sbh,
             Obx(
               () => _showEmailOtpInput.value
                   ? Column(
@@ -140,7 +142,7 @@ class _SupabaseLoginPageState extends State<SupabaseLoginPage> {
                             return null;
                           },
                         ),
-                        const SizedBox(height: 20),
+                        20.sbh,
                         Obx(
                           () => ElevatedButton(
                             onPressed: _authController.isLoading.value
@@ -151,20 +153,16 @@ class _SupabaseLoginPageState extends State<SupabaseLoginPage> {
                               minimumSize: const Size(double.infinity, 50),
                             ),
                             child: _authController.isLoading.value
-                                ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
+                                ? CircularProgressIndicator(
                                       strokeWidth: 2,
-                                    ),
-                                  )
+                                    ).sbs(20)
                                 : const Text(
                                     '验证并登录',
                                     style: TextStyle(fontSize: 16),
                                   ),
                           ),
                         ),
-                        const SizedBox(height: 10),
+                        10.sbh,
                         Obx(
                           () => _authController.countdown.value > 0
                               ? Text(
@@ -188,13 +186,9 @@ class _SupabaseLoginPageState extends State<SupabaseLoginPage> {
                           minimumSize: const Size(double.infinity, 50),
                         ),
                         child: _authController.isLoading.value
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
+                            ? CircularProgressIndicator(
                                   strokeWidth: 2,
-                                ),
-                              )
+                                ).sbs(20)
                             : const Text(
                                 '发送验证码',
                                 style: TextStyle(fontSize: 16),
@@ -202,7 +196,7 @@ class _SupabaseLoginPageState extends State<SupabaseLoginPage> {
                       ),
                     ),
             ),
-            const SizedBox(height: 20),
+            20.sbh,
             Obx(
               () => _authController.errorMessage.value.isNotEmpty
                   ? Container(
@@ -217,9 +211,9 @@ class _SupabaseLoginPageState extends State<SupabaseLoginPage> {
                         style: TextStyle(color: Colors.red.shade700),
                       ),
                     )
-                  : const SizedBox.shrink(),
+                  : SizedBox.shrink(),
             ),
-            const SizedBox(height: 20),
+            20.sbh,
             // 分隔线
             const Divider(thickness: 1),
             // 提示信息
@@ -240,7 +234,7 @@ class _SupabaseLoginPageState extends State<SupabaseLoginPage> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  4.sbh,
                   Text(
                     '通过验证码登录后，可在"Supabase 账号"设置中点击"密码管理"来设置密码，之后即可使用邮箱密码直接登录。',
                     style: TextStyle(color: Colors.blue.shade700, fontSize: 12),

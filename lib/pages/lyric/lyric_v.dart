@@ -7,150 +7,18 @@ class LyricVPage extends StatefulWidget {
 
 class _LyricVPageState extends State<LyricVPage>
     with TickerProviderStateMixin, LyricFormattingMixin {
-  late XLyricController lyricController;
-  late PlayController playController;
-  late SettingsController settingsController;
-
-  @override
-  void initState() {
-    super.initState();
-
-    // 初始化控制器
-    lyricController = Get.find<XLyricController>();
-    playController = Get.find<PlayController>();
-    settingsController = Get.find<SettingsController>();
-    // WidgetsBinding.instance.addPostFrameCallback(
-    //   (_) => lyricController.loadLyric(),
-    // );
-  }
-
-  // 创建主题化的歌词样式
-  LyricStyle _createThemedLyricStyle(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return LyricStyle(
-      textStyle: TextStyle(
-        fontSize: 16,
-        color:
-            theme.textTheme.bodyLarge?.color?.withOpacity(isDark ? 0.8 : 0.7) ??
-            (isDark ? Colors.white70 : Colors.black54),
-      ),
-      activeStyle: TextStyle(
-        fontSize: 18,
-        color: theme.colorScheme.primary,
-        fontWeight: FontWeight.w600,
-      ),
-      translationStyle: TextStyle(
-        fontSize: 14,
-        color:
-            theme.textTheme.bodyMedium?.color?.withOpacity(
-              isDark ? 0.6 : 0.5,
-            ) ??
-            (isDark ? Colors.white60 : Colors.black45),
-      ),
-      translationActiveColor: theme.colorScheme.primary.withOpacity(0.7),
-      lineTextAlign: TextAlign.center,
-      lineGap: 26,
-      translationLineGap: 10,
-      contentAlignment: CrossAxisAlignment.center,
-      contentPadding: EdgeInsets.only(
-        top: 500.w,
-        left: 20,
-        right: 20,
-        bottom: 20,
-      ),
-      selectionAnchorPosition: 0.48,
-      fadeRange: FadeRange(top: 80, bottom: 80),
-      selectedColor: theme.colorScheme.primary,
-      selectedTranslationColor: theme.colorScheme.primary.withOpacity(0.7),
-      scrollDuration: Duration(milliseconds: 240),
-      scrollDurations: {
-        500: Duration(milliseconds: 500),
-        1000: Duration(milliseconds: 1000),
-      },
-      enableSwitchAnimation: false,
-      selectionAutoResumeMode: SelectionAutoResumeMode.selecting,
-      selectionAutoResumeDuration: Duration(milliseconds: 320),
-      activeAutoResumeDuration: Duration(milliseconds: 3000),
-      activeHighlightColor: theme.colorScheme.primaryFixed.withAlpha(200),
-      switchEnterDuration: Duration(milliseconds: 300),
-      switchExitDuration: Duration(milliseconds: 500),
-      switchEnterCurve: Curves.easeOutBack,
-      switchExitCurve: Curves.easeOutQuint,
-      selectionAlignment: MainAxisAlignment.center,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        playController.sheetController.animateTo(
-          playController.sheetMidOffset,
-          duration: Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-        );
-        return false;
-      },
-      child: Stack(
+    return PopScope(
+      canPop: false,
+      child: Column(
         children: [
-          Column(
-            children: [
-              Expanded(child: _buildLyricContent()),
-              _buildTranslationToggle(context),
-              IgnorePointer(child: SizedBox(height: 500.w)),
-            ],
-          ),
+          Expanded(child: RepaintBoundary(child: _buildLyricContent(context))),
+          _buildTranslationToggle(context),
+          IgnorePointer(child: 500.wsbh),
         ],
       ),
     );
-  }
-
-  Widget _buildLyricContent() {
-    return Obx(() {
-      // 监听翻译开关状态变化，确保UI能够响应
-      settingsController.showLyricTranslation.value;
-
-      if (lyricController.isLyricLoading.value) {
-        return Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              globalLoadingAnime,
-              SizedBox(height: 16),
-              Text('加载歌词中...'),
-            ],
-          ),
-        );
-      }
-
-      if (!lyricController.hasLyric.value) {
-        return Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                '暂无歌词',
-                style: TextStyle(
-                  fontSize: 18,
-                  color: Theme.of(context).textTheme.bodyMedium?.color,
-                ),
-              ),
-              SizedBox(height: 8),
-            ],
-          ),
-        );
-      }
-
-      return Container(
-        padding: EdgeInsets.symmetric(horizontal: 20),
-        child: LyricView(
-          controller: lyricController.lyricController,
-          style: _createThemedLyricStyle(context),
-        ),
-      );
-    });
   }
 
   Widget _buildTranslationToggle(BuildContext context) {
@@ -173,61 +41,10 @@ Widget traBtn(
   child: Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      // InkWell(
-      //   borderRadius: BorderRadius.circular(25),
-      //   onTap: () {
-      //     lyricController.toggleTranslation();
-      //   },
-      //   child: Container(
-      //     padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      //     child: Row(
-      //       mainAxisSize: MainAxisSize.min,
-      //       children: [
-      //         Text(
-      //           '译',
-      //           style: TextStyle(
-      //             fontSize: 14,
-      //             fontWeight: FontWeight.w600,
-      //             color: settingsController.showLyricTranslation.value
-      //                 ? Theme.of(context).colorScheme.primary
-      //                 : Theme.of(
-      //                     context,
-      //                   ).textTheme.bodyMedium?.color?.withOpacity(0.6),
-      //           ),
-      //         ),
-      //         SizedBox(width: 6),
-      //         AnimatedContainer(
-      //           duration: Duration(milliseconds: 200),
-      //           width: 36,
-      //           height: 20,
-      //           decoration: BoxDecoration(
-      //             borderRadius: BorderRadius.circular(10),
-      //             color: settingsController.showLyricTranslation.value
-      //                 ? Theme.of(context).colorScheme.primary
-      //                 : Theme.of(context).disabledColor,
-      //           ),
-      //           child: AnimatedAlign(
-      //             duration: Duration(milliseconds: 200),
-      //             alignment: settingsController.showLyricTranslation.value
-      //                 ? Alignment.centerRight
-      //                 : Alignment.centerLeft,
-      //             child: Container(
-      //               width: 16,
-      //               height: 16,
-      //               margin: EdgeInsets.all(2),
-      //               decoration: BoxDecoration(
-      //                 color: Colors.white,
-      //                 borderRadius: BorderRadius.circular(8),
-      //               ),
-      //             ),
-      //           ),
-      //         ),
-      //       ],
-      //     ),
-      //   ),
-      // ),
       Obx(
-        () => isEmpty(lyricController.sLyricTra.value)
+        () =>
+            isEmpty(lyricController.sLyricTra.value) ||
+                !lyricController.hasLyric.value
             ? SizedBox.shrink()
             : IconButton(
                 onPressed: lyricController.toggleTranslation,
@@ -249,31 +66,182 @@ Widget traBtn(
               ),
       ),
       IconButton(
-        onPressed: () {
-          WoltModalSheet.show(
-            context: Get.context!,
-            modalBarrierColor: Colors.transparent,
-            modalTypeBuilder: (modalSheetContext) =>
-                WoltModalType.bottomSheet(),
-            pageListBuilder: (modalSheetContext) {
-              return [
-                WoltModalSheetPage(
-                  hasTopBarLayer: false,
-                  isTopBarLayerAlwaysVisible: false,
-                  enableDrag: true,
-                  child: LyricDelayAdjuster(lyricController: lyricController),
-                ),
-              ];
-            },
-            useRootNavigator: true,
+        onPressed: lyricController.toggledisableOpacity,
+        onLongPress: () {
+          Get.find<SettingsController>().disableOpacityInLyricPage = false;
+          showLyricBackgroundBlurRadiusInputDialog(
+            disableBackgroundShadow: true,
           );
         },
         padding: EdgeInsets.zero,
-        icon: Icon(Icons.av_timer_rounded),
+        icon: Obx(
+          () => Icon(
+            Icons.opacity_rounded,
+            color: settingsController.disableOpacityInLyricPage
+                ? Theme.of(context).colorScheme.primary
+                : null,
+          ),
+        ),
       ),
+      Obx(
+        () => !Get.find<PlayController>().currentTrack.id.startsWith('bi')
+            ? SizedBox.shrink()
+            : IconButton(
+                onPressed: lyricController.findBilibiliLyric,
+                padding: EdgeInsets.zero,
+                icon: Icon(Icons.manage_search_rounded),
+              ),
+      ),
+      _ExpandableMoreMenu(lyricController: lyricController),
     ],
   ),
 );
+
+class _ExpandableMoreMenu extends StatefulWidget {
+  final XLyricController lyricController;
+
+  const _ExpandableMoreMenu({Key? key, required this.lyricController})
+    : super(key: key);
+
+  @override
+  __ExpandableMoreMenuState createState() => __ExpandableMoreMenuState();
+}
+
+class __ExpandableMoreMenuState extends State<_ExpandableMoreMenu> {
+  bool _isExpanded = false;
+  String? get nowPlatformSourceDesc {
+    final track = Get.find<PlayController>().currentTrack;
+    if (isEmpty(track.source)) return null;
+    return PlatformSourceExt.findPlatformSourceByName(
+      track.source!,
+    )?.shortDisplayName;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isExpanded = true),
+      onExit: (_) => setState(() => _isExpanded = false),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedSize(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_isExpanded) ...[
+                  IconButton(
+                    onPressed: () => showLyricStyleSettings(Get.context!),
+                    padding: EdgeInsets.zero,
+                    icon: Icon(Icons.text_format_rounded),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      WoltModalSheet.show(
+                        context: Get.context!,
+                        modalBarrierColor: Colors.transparent,
+                        modalTypeBuilder: (modalSheetContext) =>
+                            WoltModalType.bottomSheet(),
+                        pageListBuilder: (modalSheetContext) {
+                          return [
+                            WoltModalSheetPage(
+                              hasTopBarLayer: false,
+                              isTopBarLayerAlwaysVisible: false,
+                              enableDrag: true,
+                              child: LyricDelayAdjuster(
+                                lyricController: widget.lyricController,
+                              ),
+                            ),
+                          ];
+                        },
+                        useRootNavigator: true,
+                      );
+                    },
+                    padding: EdgeInsets.zero,
+                    icon: Icon(Icons.av_timer_rounded),
+                  ),
+                  Obx(() {
+                    OnlineCacheItem? currentCacheItem =
+                        Get.find<PlayController>()
+                            .currentPlayingOnlineCacheItem
+                            .value;
+                    return currentCacheItem?.qualityPlat != null
+                        ? IconButton(
+                            onPressed: () => DefaultQualitySettingsSheet.show(
+                              platformSource: currentCacheItem.qualityPlat,
+                            ),
+                            padding: EdgeInsets.zero,
+                            icon: Container(
+                              key: ValueKey(currentCacheItem?.qualityDesc),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                currentCacheItem!.qualityDesc!,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primary,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                              ),
+                            ),
+                          )
+                        : SizedBox.shrink();
+                  }),
+                ],
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: () => setState(() => _isExpanded = !_isExpanded),
+            padding: EdgeInsets.zero,
+            icon: Obx(() {
+              String? nowPlatformSourceDesc = this.nowPlatformSourceDesc;
+              return FadeThroughBox(
+                alignment: Alignment.center,
+                margin: EdgeInsets.zero,
+                child: _isExpanded && isNotEmpty(nowPlatformSourceDesc)
+                    ? Container(
+                        key: ValueKey(nowPlatformSourceDesc),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          nowPlatformSourceDesc!,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(context).colorScheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                        ),
+                      )
+                    : Icon(Icons.more_vert_rounded),
+              );
+            }).sbh(24),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class LyricVBackPage extends StatefulWidget {
   @override
@@ -348,7 +316,9 @@ class _LyricVBackPageState extends State<LyricVBackPage>
           child: Obx(
             () => buildBlurredImage(
               currentSong.img_url ?? '',
-              settingsController.lyricBackgroundBlurRadius,
+              settingsController.disableOpacityInLyricPage
+                  ? 0
+                  : settingsController.lyricBackgroundBlurRadius,
             ),
           ),
         ),
@@ -555,7 +525,7 @@ class LyricDelayAdjuster extends StatelessWidget {
             ),
           ),
 
-          SizedBox(height: 12),
+          12.sbh,
           // 全局延迟调整
           _DelaySliderItem(
             label: Text(
@@ -568,7 +538,7 @@ class LyricDelayAdjuster extends StatelessWidget {
             theme: theme,
             enabled: true,
           ),
-          SizedBox(height: 16),
+          16.sbh,
         ],
       ),
     );
@@ -654,7 +624,7 @@ class _DelaySliderItemState extends State<_DelaySliderItem> {
                   ),
                 ],
               ),
-              SizedBox(height: 12),
+              12.sbh,
               // 滑块
               Row(
                 children: [

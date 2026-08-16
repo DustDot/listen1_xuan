@@ -4,8 +4,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:listen1_xuan/controllers/receiveSharingIntentController.dart';
 import 'package:listen1_xuan/funcs.dart';
 import 'package:listen1_xuan/main.dart';
+import 'package:listen1_xuan/widgets/motor_progress_indicator_xuan.dart';
+import 'package:listen1_xuan/widgets/draggable_toast/draggable_toast.dart';
 import 'package:logger/logger.dart';
 import 'package:listen1_xuan/models/Track.dart';
 import 'package:punycode/punycode.dart';
@@ -13,6 +16,7 @@ import 'package:punycode/punycode.dart';
 import '../global_settings_animations.dart';
 import '../models/websocket_message.dart';
 import '../settings.dart';
+import '../utils/platform_credentials.dart';
 import 'controllers.dart';
 
 /// WebSocket 客户端控制器
@@ -27,9 +31,9 @@ class WebSocketClientController extends GetxController {
   /// UI状态
   final RxBool _isExpanded = false.obs;
   final RxString _statusMessage = '未连接'.obs;
-  final RxBool _isConnecting = false.obs;
+  final RxBool i_isConnecting = false.obs;
   final RxBool _isDisconnecting = false.obs;
-  final RxBool _isConnected = false.obs;
+  final RxBool i_isConnected = false.obs;
   final RxString _serverUrl = ''.obs;
 
   /// WebSocket客户端是否自动启动的标志位
@@ -69,22 +73,19 @@ class WebSocketClientController extends GetxController {
   final Rx<Duration> totalTime = Duration(minutes: 1).obs;
   final RxBool _isDraggingProcess = false.obs;
 
-  /// 消息控制器
-  final TextEditingController messageController = TextEditingController();
-
   /// 播放状态数据
   final Rx<PlayStatusData?> _lastPlayStatus = Rx<PlayStatusData?>(null);
 
   /// Getters (返回响应式值)
   RxBool get isExpandedRx => _isExpanded;
   RxString get statusMessageRx => _statusMessage;
-  RxBool get isConnectingRx => _isConnecting;
+  RxBool get isConnectingRx => i_isConnecting;
   RxBool get isDisconnectingRx => _isDisconnecting;
   RxString get serverAddressRx => _serverAddress;
   RxBool get autoReconnectRx => _autoReconnect;
   RxInt get reconnectIntervalRx => _reconnectInterval;
   RxInt get heartbeatIntervalRx => _heartbeatInterval;
-  RxBool get isConnectedRx => _isConnected;
+  RxBool get isConnectedRx => i_isConnected;
   RxString get serverUrlRx => _serverUrl;
   RxBool get wsClientAutoStartRx => _wsClientAutoStart;
   RxBool get wsClientBtnShowRx => _wsClientBtnShow;
@@ -98,13 +99,13 @@ class WebSocketClientController extends GetxController {
   // 保留原有的getter用于非响应式访问
   bool get isExpanded => _isExpanded.value;
   String get statusMessage => _statusMessage.value;
-  bool get isConnecting => _isConnecting.value;
+  bool get isConnecting => i_isConnecting.value;
   bool get isDisconnecting => _isDisconnecting.value;
   String get serverAddress => _serverAddress.value;
   bool get autoReconnect => _autoReconnect.value;
   int get reconnectInterval => _reconnectInterval.value;
   int get heartbeatInterval => _heartbeatInterval.value;
-  bool get isConnected => _isConnected.value;
+  bool get isConnected => i_isConnected.value;
   String get serverUrl => _serverUrl.value;
   bool get wsClientAutoStart => _wsClientAutoStart.value;
   bool get wsClientBtnShow => _wsClientBtnShow.value;
@@ -212,6 +213,7 @@ class WebSocketClientController extends GetxController {
 
   /// 如果设置了自动启动，则连接WebSocket服务器
   Future<void> autoConnectIfNeeded() async {
+    if (isAndroid) Get.find<ReceiveSharingIntentController>().regController();
     if (_wsClientAutoStart.value) {
       _logger.i('$_tag 自动连接WebSocket服务器');
       await connect();
@@ -222,7 +224,6 @@ class WebSocketClientController extends GetxController {
   void onInit() {
     super.onInit();
     // 加载设置
-    loadWebSocketClientSettings();
     _updateStatusMessage();
     _logger.i('$_tag 初始化完成');
     interval(_volume, (value) {
@@ -242,7 +243,6 @@ class WebSocketClientController extends GetxController {
 
   @override
   void onClose() {
-    messageController.dispose();
     stopStatusPolling();
     _disconnect(manual: true);
     super.onClose();
@@ -329,20 +329,11 @@ class WebSocketClientController extends GetxController {
       throw '地址不能为空';
     }
 
-    // 验证地址格式
-    if (!_isValidAddress(address)) {
-      // _showError('地址格式不正确，应为 "IP:端口" 格式');
-      // return;
-      throw '地址格式不正确，应为 "IP:端口" 格式';
-    }
-
     _addToHistoryAddresses(address);
 
     // 自动选中新添加的地址
     _serverAddress.value = address;
     saveWebSocketClientSettings();
-
-    _showSuccess('地址已添加并选中');
   }
 
   /// 编辑历史地址
@@ -354,12 +345,6 @@ class WebSocketClientController extends GetxController {
 
     if (newAddress.isEmpty) {
       _showError('地址不能为空');
-      return;
-    }
-
-    // 验证地址格式
-    if (!_isValidAddress(newAddress)) {
-      _showError('地址格式不正确，应为 "IP:端口" 格式');
       return;
     }
 
@@ -383,7 +368,6 @@ class WebSocketClientController extends GetxController {
     // 保存到设置
     saveWebSocketClientSettings();
     _logger.i('$_tag 历史地址已更新: $oldAddress -> $newAddress');
-    _showSuccess('地址已更新');
   }
 
   /// 删除历史地址
@@ -400,23 +384,6 @@ class WebSocketClientController extends GetxController {
     saveWebSocketClientSettings();
     _logger.i('$_tag 历史地址已删除: $address');
     _showSuccess('地址已删除');
-  }
-
-  /// 验证地址格式
-  bool _isValidAddress(String address) {
-    return true;
-    if (address.isEmpty) return false;
-
-    final RegExp addressRegex = RegExp(
-      r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?):(?:[0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$',
-    );
-
-    // 也支持主机名格式
-    final RegExp hostnameRegex = RegExp(
-      r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*:[0-9]{1,5}$',
-    );
-
-    return addressRegex.hasMatch(address) || hostnameRegex.hasMatch(address);
   }
 
   /// 开始拖动进度
@@ -493,26 +460,70 @@ class WebSocketClientController extends GetxController {
     }
   }
 
-  /// 连接到WebSocket服务器
-  Future<void> connect() async {
-    if (isConnected || _isConnecting.value) return;
-
-    try {
-      _isConnecting.value = true;
-      _connectionCancelled = false; // 重置取消标志
-      _updateStatusMessage('正在连接...');
-
-      // 解析服务器地址
-      final addressParts = _serverAddress.value.split(':');
-      if (addressParts.length != 2) {
-        throw Exception('服务器地址格式错误，应为 "IP:端口"');
+  /// 从地址字符串解析出 host 和 port
+  /// 支持格式: "host:port", "[IPv6]:port"
+  static (String host, int port) parseAddress(String address) {
+    if (address.startsWith('[')) {
+      // IPv6 格式: [host]:port
+      final closeBracket = address.indexOf(']');
+      if (closeBracket == -1 ||
+          closeBracket + 2 >= address.length ||
+          address[closeBracket + 1] != ':') {
+        throw Exception('IPv6 地址格式错误，应为 "[IPv6地址]:端口"');
       }
-
-      String host = addressParts[0];
-      final port = int.tryParse(addressParts[1]);
+      final host = address.substring(1, closeBracket);
+      final port = int.tryParse(address.substring(closeBracket + 2));
       if (port == null || port < 1 || port > 65535) {
         throw Exception('端口号无效');
       }
+      return (host, port);
+    } else {
+      // IPv4/hostname 格式: host:port
+      final lastColon = address.lastIndexOf(':');
+      if (lastColon == -1) {
+        throw Exception('地址格式错误，应为 "IP:端口" 或 "[IPv6地址]:端口"');
+      }
+      final host = address.substring(0, lastColon);
+      final port = int.tryParse(address.substring(lastColon + 1));
+      if (port == null || port < 1 || port > 65535) {
+        throw Exception('端口号无效');
+      }
+      return (host, port);
+    }
+  }
+
+  /// 格式化 host 和 port 为存储地址格式
+  /// IPv6 地址自动加方括号
+  static String formatAddress(String host, int port) {
+    if (host.contains(':')) {
+      // IPv6 地址需要方括号
+      return '[$host]:$port';
+    }
+    return '$host:$port';
+  }
+
+  /// 构建 WebSocket URI（IPv6 自动加方括号）
+  static String _buildWsUri(String host, int port) {
+    if (host.contains(':')) {
+      return 'ws://[$host]:$port';
+    }
+    return 'ws://$host:$port';
+  }
+
+  /// 连接到WebSocket服务器
+  Future<void> connect() async {
+    if (isConnected || i_isConnecting.value) return;
+
+    try {
+      i_isConnecting.value = true;
+      _connectionCancelled = false; // 重置取消标志
+      _updateStatusMessage('正在连接...');
+
+      // 解析服务器地址（支持 IPv4/IPv6）
+      final (parsedHost, parsedPort) = parseAddress(_serverAddress.value);
+
+      String host = parsedHost;
+      final port = parsedPort;
 
       // 如果主机名包含非 ASCII 字符，转换为 Punycode 编码
       if (_containsNonAscii(host)) {
@@ -521,7 +532,7 @@ class WebSocketClientController extends GetxController {
         _logger.i('$_tag 检测到非 ASCII 主机名，转换为 Punycode: $originalHost -> $host');
       }
 
-      final uri = 'ws://$host:$port';
+      final uri = _buildWsUri(host, port);
       _serverUrl.value = uri;
 
       // 检查是否已取消连接
@@ -541,7 +552,7 @@ class WebSocketClientController extends GetxController {
         return;
       }
 
-      _isConnected.value = true;
+      i_isConnected.value = true;
       _updateStatusMessage('已连接');
       _showSuccess('WebSocket 客户端连接成功');
       _logger.i('$_tag WebSocket客户端连接成功: $uri');
@@ -568,7 +579,7 @@ class WebSocketClientController extends GetxController {
         onError: _onError,
       );
     } catch (e) {
-      _isConnected.value = false;
+      i_isConnected.value = false;
       _serverUrl.value = '';
 
       if (_connectionCancelled) {
@@ -584,7 +595,7 @@ class WebSocketClientController extends GetxController {
         }
       }
     } finally {
-      _isConnecting.value = false;
+      i_isConnecting.value = false;
     }
   }
 
@@ -595,7 +606,7 @@ class WebSocketClientController extends GetxController {
 
   /// 取消正在进行的连接
   void cancelConnection() {
-    if (_isConnecting.value) {
+    if (i_isConnecting.value) {
       _connectionCancelled = true;
       _logger.i('$_tag 用户取消连接');
       _showInfo('正在取消连接...');
@@ -630,7 +641,7 @@ class WebSocketClientController extends GetxController {
       await _webSocket?.close();
       _webSocket = null;
 
-      _isConnected.value = false;
+      i_isConnected.value = false;
       _serverUrl.value = '';
       _updateStatusMessage(manual ? '已断开' : '连接中断');
 
@@ -647,31 +658,16 @@ class WebSocketClientController extends GetxController {
   }
 
   /// 发送消息
-  void sendMessage() {
+  bool sendMessage(WebSocketMessage msg) {
     if (!isConnected) {
       _showError('未连接到服务器');
-      return;
+      return false;
     }
-
-    final message = messageController.text.trim();
-    if (message.isEmpty) {
-      _showError('请输入要发送的消息');
-      return;
-    }
-
     try {
-      final messageObj = WebSocketMessageBuilder.createMessage(
-        message,
-        from: 'flutter_client',
-      );
-
-      _webSocket!.add(messageObj.toJsonString());
-      messageController.clear();
-      _showSuccess('消息已发送');
-      _logger.i('$_tag 消息已发送: $message');
+      _webSocket!.add(msg.toJsonString());
+      return true;
     } catch (e) {
-      _showError('发送消息失败: $e');
-      _logger.e('$_tag 发送消息失败', error: e);
+      return false;
     }
   }
 
@@ -904,8 +900,10 @@ class WebSocketClientController extends GetxController {
                 for (var k in PlantformCodes.values) {
                   if (contentMap.containsKey(k)) {
                     await savePlatformToken(
-                      k,
-                      contentMap[k]!,
+                      PlatformCredentials(
+                        platform: k,
+                        credentials: contentMap[k]!,
+                      ),
                       saveRightNow: false,
                     );
                   }
@@ -924,7 +922,33 @@ class WebSocketClientController extends GetxController {
             }
           });
           break;
-
+        case WebSocketMessageType.sendPasteText:
+          unawaited(
+            Get.find<PasteController>().onReceivedPasteText(message.content),
+          );
+          break;
+        case WebSocketMessageType.reqToGetFile:
+          try {
+            final fileNames = (jsonDecode(message.content) as List<dynamic>)
+                .map((e) => e.toString())
+                .toList();
+            unawaited(
+              Get.find<PasteController>().onReceivedReqToGetFile(fileNames),
+            );
+          } catch (e) {
+            _logger.e('$_tag 处理 reqToGetFile 消息失败', error: e);
+          }
+          break;
+        case WebSocketMessageType.reqToGetImage:
+          try {
+            final fileName = message.content;
+            unawaited(
+              Get.find<PasteController>().onReceivedReqToGetImage(fileName),
+            );
+          } catch (e) {
+            _logger.e('$_tag 处理 reqToGetImage 消息失败', error: e);
+          }
+          break;
         case WebSocketMessageType.welcome:
           // 处理欢迎消息
           if (message.content.isNotEmpty) {
@@ -954,7 +978,7 @@ class WebSocketClientController extends GetxController {
   /// 处理连接断开
   void _onDisconnected() {
     _logger.i('$_tag WebSocket连接已断开');
-    _isConnected.value = false;
+    i_isConnected.value = false;
     _serverUrl.value = '';
     _stopHeartbeatTimer();
     stopStatusPolling();
@@ -970,7 +994,7 @@ class WebSocketClientController extends GetxController {
   /// 处理连接错误
   void _onError(dynamic error) {
     _logger.e('$_tag WebSocket连接错误', error: error);
-    _isConnected.value = false;
+    i_isConnected.value = false;
     _serverUrl.value = '';
     _stopHeartbeatTimer();
     stopStatusPolling();
@@ -992,7 +1016,7 @@ class WebSocketClientController extends GetxController {
       Duration(seconds: _reconnectInterval.value),
       () async {
         if (_autoReconnect.value &&
-            !_isConnected.value &&
+            !i_isConnected.value &&
             !_connectionCancelled) {
           _logger.i('$_tag 尝试自动重连...');
           await connect();
@@ -1014,7 +1038,7 @@ class WebSocketClientController extends GetxController {
     _heartbeatTimer = Timer.periodic(
       Duration(seconds: _heartbeatInterval.value),
       (timer) {
-        if (_isConnected.value) {
+        if (i_isConnected.value) {
           try {
             final pingMessage = WebSocketMessageBuilder.createPingMessage();
             _webSocket!.add(pingMessage.toJsonString());

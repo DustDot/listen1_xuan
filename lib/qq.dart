@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart';
 import 'package:html/parser.dart' show parse;
+import 'constants/const.dart';
 import 'controllers/DioController.dart';
 import 'lowebutil.dart';
 import 'package:marquee/marquee.dart';
@@ -19,10 +20,23 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'global_settings_animations.dart';
 import 'package:listen1_xuan/models/Track.dart';
+import 'utils/cookie_utils.dart';
 
 final qq = QQ();
 
+enum QQPlaylistType {
+  playlist('qqplaylist'),
+  album('qqalbum'),
+  artist('qqartist'),
+  toplist('qqtoplist');
+
+  final String prefix;
+  const QQPlaylistType(this.prefix);
+}
+
 class QQ {
+  static String get sourceName => PlatformSource.qq.toString();
+
   static String htmlDecode(String value) {
     var document = parse(value);
     return document.body?.text ?? '';
@@ -45,14 +59,6 @@ class QQ {
         },
       ),
     );
-  }
-
-  Future<dynamic> dio_post_with_cookie_and_csrf(
-    String url,
-    dynamic data,
-  ) async {
-    print("dio_post_with_cookie_and_csrf");
-    return await dioWithCookieManager.post(url, data: data);
   }
 
   Future<Map<String, dynamic>> qq_show_toplist([int offset = 0]) async {
@@ -157,7 +163,7 @@ class QQ {
       'album': htmlDecode(song['albumname']),
       'album_id': 'qqalbum_${song['albummid']}',
       'img_url': qq_get_image_url(song['albummid'], 'album'),
-      'source': 'qq',
+      'source': sourceName,
       'source_url':
           'https://y.qq.com/#type=song&mid=${song['songmid']}&tpl=yqq_song_detail',
       'url': !qq_is_playable(song) ? '' : null,
@@ -174,7 +180,7 @@ class QQ {
       'album': htmlDecode(song['album']['name']),
       'album_id': 'qqalbum_${song['album']['mid']}',
       'img_url': qq_get_image_url(song['album']['mid'], 'album'),
-      'source': 'qq',
+      'source': sourceName,
       'source_url':
           'https://y.qq.com/#type=song&mid=${song['mid']}&tpl=yqq_song_detail',
       'url': '',
@@ -253,7 +259,7 @@ class QQ {
                   'album': htmlDecode(song['album']['name']),
                   'album_id': 'qqalbum_${song['album']['mid']}',
                   'img_url': qq_get_image_url(song['album']['mid'], 'album'),
-                  'source': 'qq',
+                  'source': sourceName,
                   'source_url':
                       'https://y.qq.com/#type=song&mid=${song['mid']}&tpl=yqq_song_detail',
                 };
@@ -411,50 +417,62 @@ class QQ {
     var searchTypeMapping = {'0': 0, '1': 3};
     return {
       'success': (fn) async {
-        var limit = 50;
-        var page = curpage;
-        var query = {
-          'comm': {'ct': '19', 'cv': '1859', 'uin': '0'},
-          'req': {
-            'method': 'DoSearchForQQMusicDesktop',
-            'module': 'music.search.SearchCgiService',
-            'param': {
-              'grp': 1,
-              'num_per_page': limit,
-              'page_num': int.parse(page),
-              'query': keyword,
-              'search_type': searchTypeMapping[searchType],
+        try {
+          var limit = 50;
+          var page = curpage;
+          var query = {
+            'comm': {'ct': '19', 'cv': '1859', 'uin': '0'},
+            'req': {
+              'method': 'DoSearchForQQMusicDesktop',
+              'module': 'music.search.SearchCgiService',
+              'param': {
+                'grp': 1,
+                'num_per_page': limit,
+                'page_num': int.parse(page),
+                'query': keyword,
+                'search_type': searchTypeMapping[searchType],
+              },
             },
-          },
-        };
-        var response = await dio_post_with_cookie_and_csrf(target_url, query);
-        var data = jsonDecode(response.data);
-        var result = [];
-        var total = 0;
-        if (searchType == '0') {
-          for (var item in data['req']['data']['body']['song']['list']) {
-            result.add(qq_convert_song2(item));
+          };
+          var response = await dioWithCookieManager.post(
+            target_url,
+            data: query,
+          );
+          var data = jsonDecode(response.data);
+          var result = [];
+          var total = 0;
+          if (searchType == '0') {
+            for (var item in data['req']['data']['body']['song']['list']) {
+              result.add(qq_convert_song2(item));
+            }
+            total = data['req']['data']['meta']['sum'];
+          } else if (searchType == '1') {
+            result = data['req']['data']['body']['songlist']['list']
+                .map(
+                  (info) => ({
+                    'id': 'qqplaylist_${info['dissid']}',
+                    'title': htmlDecode(info['dissname']),
+                    'source': sourceName,
+                    'source_url':
+                        'https://y.qq.com/n/ryqq/playlist/${info['dissid']}',
+                    'img_url': info['imgurl'],
+                    'url': 'qqplaylist_${info['dissid']}',
+                    'author': UnicodeToAscii(info['creator']['name']),
+                    'count': info['song_count'],
+                  }),
+                )
+                .toList();
+            total = data['req']['data']['meta']['sum'];
           }
-          total = data['req']['data']['meta']['sum'];
-        } else if (searchType == '1') {
-          result = data['req']['data']['body']['songlist']['list']
-              .map(
-                (info) => ({
-                  'id': 'qqplaylist_${info['dissid']}',
-                  'title': htmlDecode(info['dissname']),
-                  'source': 'qq',
-                  'source_url':
-                      'https://y.qq.com/n/ryqq/playlist/${info['dissid']}',
-                  'img_url': info['imgurl'],
-                  'url': 'qqplaylist_${info['dissid']}',
-                  'author': UnicodeToAscii(info['creator']['name']),
-                  'count': info['song_count'],
-                }),
-              )
-              .toList();
-          total = data['req']['data']['meta']['sum'];
+          return fn({'result': result, 'total': total, 'type': searchType});
+        } catch (e) {
+          return fn({
+            'result': [],
+            'total': 0,
+            'type': searchType,
+            'error': e.toString(),
+          });
         }
-        return fn({'result': result, 'total': total, 'type': searchType});
       },
     };
   }
@@ -477,7 +495,7 @@ class QQ {
     Function success,
     Function failure,
   ) async {
-    Map<String, dynamic> settings = settings_getsettings();
+    Map<String, dynamic> settings = lengcyGetSettings();
     String qqcookie = settings['qq'] ?? '';
     // print(qqcookie);
 
@@ -524,7 +542,7 @@ class QQ {
       'loginUin': uin,
       'comm': {'uin': uin, 'format': 'json', 'ct': 24, 'cv': 0},
     };
-    var response = await dio_post_with_cookie_and_csrf(target_url, reqData);
+    var response = await dioWithCookieManager.post(target_url, data: reqData);
     var data = jsonDecode(response.data);
     var purl = data['req_1']['data']['midurlinfo'][0]['purl'];
     if (purl == '') {
@@ -536,7 +554,7 @@ class QQ {
     var prefix = purl.substring(0, 4);
     var found = fileConfig.values.where((i) => i['s'] == prefix);
     sound['bitrate'] = found.isNotEmpty ? found.first['bitrate'] : '';
-    sound['platform'] = 'qq';
+    sound['platform'] = sourceName;
     success(sound, track);
   }
 
@@ -720,19 +738,18 @@ class QQ {
   // }
   Future<Map<String, dynamic>?> get_playlist(String url) async {
     var list_id = getParameterByName('list_id', url).split('_').first;
-    switch (list_id) {
-      case 'qqplaylist':
-        return qq_get_playlist(url);
-      case 'qqalbum':
-        return qq_album(url);
-      case 'qqartist':
-        return qq_artist(url);
-      case 'qqtoplist':
-        return qq_toplist(url);
-      default:
-        return null;
-    }
+    // switch (list_id) {
+    if (list_id == QQPlaylistType.playlist.prefix) return qq_get_playlist(url);
+    // case 'qqalbum':
+    if (list_id == QQPlaylistType.album.prefix) return qq_album(url);
+    // case 'qqartist':
+    if (list_id == QQPlaylistType.artist.prefix) return qq_artist(url);
+    // case 'qqtoplist':
+    if (list_id == QQPlaylistType.toplist.prefix) return qq_toplist(url);
+    // default:
+    return null;
   }
+
   // static get_playlist_filters() {
   //   const target_url =
   //     'https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_tag_conf.fcg' +
@@ -910,12 +927,13 @@ class QQ {
         'user_name': uin,
         'nickname': info['nick'],
         'avatar': info['headurl'],
-        'platform': 'qq',
+        'platform': sourceName,
         'data': data,
       };
       // callback({'status': 'success', 'data': result});
       return {'status': 'success', 'data': result};
     } catch (e) {
+      logger.e('get_user_by_uin error: $e');
       return {'status': 'fail', 'data': {}};
     }
   }
@@ -1324,19 +1342,18 @@ class QQ {
   //   };
   // }
   Future<Map<String, dynamic>> get_user() async {
-    final settings = settings_getsettings();
+    final settings = lengcyGetSettings();
     if (settings['qq'] == null) {
       return {'status': 'fail', 'data': {}};
     }
-    for (var cookie in settings['qq'].split(';')) {
-      var cookieParts = cookie.split('=');
-      if (cookieParts[0] == 'uin') {
-        return get_user_by_uin(cookieParts[1]);
-      }
-      if (cookieParts[0] == 'wxuin') {
-        var uin = '1${cookieParts[1].substring('o'.length)}';
-        return get_user_by_uin(uin);
-      }
+    final cookies = CookieUtils.parseCookieString(settings['qq']);
+    final uin = CookieUtils.getCookieValue(cookies, 'uin');
+    if (uin != null) {
+      return get_user_by_uin(uin);
+    }
+    final wxuin = CookieUtils.getCookieValue(cookies, 'wxuin');
+    if (wxuin != null) {
+      return get_user_by_uin('1${wxuin.substring('o'.length)}');
     }
     return {'status': 'fail', 'data': {}};
   }

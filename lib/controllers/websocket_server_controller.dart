@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:get/get.dart';
+import 'package:listen1_xuan/controllers/paste_controller.dart';
+import 'package:path/path.dart' as p;
+import 'package:listen1_xuan/controllers/websocket_card_controller.dart';
 import 'package:listen1_xuan/funcs.dart';
 import 'package:listen1_xuan/global_settings_animations.dart';
 import 'package:logger/logger.dart';
@@ -37,6 +41,15 @@ class WebSocketServerController extends GetxController {
   /// 连接客户端数量
   final RxInt _clientCount = 0.obs;
 
+  /// 当前粘贴的文件路径列表（供客户端通过 /getPasteFile 下载）
+  List<String> nowPasteFiles = [];
+
+  /// 当前粘贴的图片数据（保存在内存中，供客户端通过 /getPasteImage 下载）
+  Uint8List? nowPasteImageData;
+
+  /// 粘贴图片的文件名
+  String? nowPasteImageFileName;
+
   /// 服务器配置
   late final String _host;
   late final int _port;
@@ -46,7 +59,7 @@ class WebSocketServerController extends GetxController {
   /// Getters
   bool get isRunning => _isRunning.value;
   int get clientCount => _clientCount.value;
-  String get serverUrl => 'ws://$_host:$_port/ws';
+  String get serverUrl => _host.contains(':') ? 'ws://[$_host]:$_port/ws' : 'ws://$_host:$_port/ws';
 
   WebSocketServerController({
     required String host,
@@ -162,7 +175,6 @@ class WebSocketServerController extends GetxController {
       connection.id,
     );
     _sendMessage(connection, welcomeMessage);
-
     // 监听消息
     webSocket.listen(
       (data) => _handleMessage(connection, data),
@@ -226,6 +238,12 @@ class WebSocketServerController extends GetxController {
             from: connection.id,
           );
           _broadcastMessage(broadcastMsg, excludeClient: connection.id);
+          break;
+        case WebSocketMessageType.sendPasteText:
+          unawaited(
+            Get.find<PasteController>().onReceivedPasteText(message.content),
+          );
+
           break;
         case WebSocketMessageType.getCookie:
           Set<String> toOpr = {};
@@ -473,11 +491,11 @@ class WebSocketServerController extends GetxController {
       final track = Track.fromJson(trackData);
 
       _logger.i('$_tag 准备设置下一首歌曲: ${track.title} - ${track.artist}');
-      
+
       try {
         Get.find<PlayController>().nextTrack = track;
         _logger.i('$_tag 下一首歌曲已设置: ${track.title}');
-        
+
         // 发送成功响应
         final successMessage = WebSocketMessageBuilder.createMessage(
           '下一首已设置: ${track.title} - ${track.artist}',
@@ -745,6 +763,18 @@ class WebSocketServerController extends GetxController {
             );
         }
         break;
+      case '/onPasteFile':
+        await _handleOnPasteFile(request);
+        return;
+      case '/getPasteFile':
+        await _handleGetPasteFile(request);
+        return;
+      case '/onPasteImage':
+        await _handleOnPasteImage(request);
+        return;
+      case '/getPasteImage':
+        await _handleGetPasteImage(request);
+        return;
       default:
         request.response
           ..statusCode = HttpStatus.notFound
@@ -752,6 +782,254 @@ class WebSocketServerController extends GetxController {
     }
 
     request.response.close();
+  }
+
+  /// 处理 /onPasteFile POST 请求 - 接收客户端粘贴的文件并保存到下载目录
+  Future<void> _handleOnPasteFile(HttpRequest request) async {
+    try {
+      if (request.method != 'POST') {
+        request.response
+          ..statusCode = HttpStatus.methodNotAllowed
+          ..write('Method Not Allowed');
+        request.response.close();
+        return;
+      }
+
+      final contentType = request.headers.contentType;
+      if (contentType == null ||
+          contentType.mimeType != 'multipart/form-data') {
+        request.response
+          ..statusCode = HttpStatus.badRequest
+          ..write('Expected multipart/form-data');
+        request.response.close();
+        return;
+      }
+
+      final boundary = contentType.parameters['boundary'];
+      if (boundary == null) {
+        request.response
+          ..statusCode = HttpStatus.badRequest
+          ..write('Missing boundary');
+        request.response.close();
+        return;
+      }
+
+      // 获取下载目录
+      final downloadDir = await getPasteFileDownloadDir();
+
+      // 读取整个请求体
+      final bytes = await _collectRequestBytes(request);
+      final parts = PasteController.parseMultipartResponse(bytes, boundary);
+
+      int savedCount = 0;
+      for (final part in parts) {
+        final fileName = part['filename'] as String?;
+        final data = part['data'] as List<int>?;
+        if (fileName != null && data != null) {
+          final savePath = _getUniqueFilePath(downloadDir, fileName);
+          await File(savePath).writeAsBytes(data);
+          savedCount++;
+          _logger.i('$_tag 保存粘贴文件: $savePath');
+        }
+      }
+
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType.json
+        ..write(json.encode({'saved': savedCount}));
+      request.response.close();
+
+      if (savedCount > 0) {
+        showSuccessSnackbar('收到 $savedCount 个粘贴文件', '已保存到下载目录');
+      }
+    } catch (e) {
+      _logger.e('$_tag 处理 /onPasteFile 请求失败', error: e);
+      try {
+        request.response
+          ..statusCode = HttpStatus.internalServerError
+          ..write('Internal Server Error: $e');
+        request.response.close();
+      } catch (_) {}
+    }
+  }
+
+  /// 处理 /getPasteFile GET 请求 - 将 nowPasteFiles 中的文件以 multipart/mixed 方式返回
+  Future<void> _handleGetPasteFile(HttpRequest request) async {
+    try {
+      if (nowPasteFiles.isEmpty) {
+        request.response
+          ..statusCode = HttpStatus.notFound
+          ..headers.contentType = ContentType.json
+          ..write(json.encode({'error': 'No paste files available'}));
+        request.response.close();
+        return;
+      }
+
+      const boundary = '----PasteFileBoundary';
+      request.response.statusCode = HttpStatus.ok;
+      request.response.headers.set(
+        HttpHeaders.contentTypeHeader,
+        'multipart/mixed; boundary=$boundary',
+      );
+
+      for (final filePath in nowPasteFiles) {
+        final file = File(filePath);
+        if (!await file.exists()) continue;
+
+        final fileName = p.basename(filePath);
+        final encodedFileName = Uri.encodeComponent(fileName);
+
+        // 写 boundary 和 headers
+        request.response.write('--$boundary\r\n');
+        request.response.write(
+          'Content-Disposition: attachment; filename*=UTF-8\'\'$encodedFileName\r\n',
+        );
+        request.response.write('Content-Type: application/octet-stream\r\n');
+        final fileSize = await file.length();
+        request.response.write('Content-Length: $fileSize\r\n');
+        request.response.write('\r\n');
+
+        // 写文件内容
+        final fileBytes = await file.readAsBytes();
+        request.response.add(fileBytes);
+        request.response.write('\r\n');
+      }
+
+      // 结束 boundary
+      request.response.write('--$boundary--\r\n');
+      await request.response.close();
+
+      _logger.i('$_tag 返回 ${nowPasteFiles.length} 个粘贴文件');
+    } catch (e) {
+      _logger.e('$_tag 处理 /getPasteFile 请求失败', error: e);
+      try {
+        request.response
+          ..statusCode = HttpStatus.internalServerError
+          ..write('Internal Server Error: $e');
+        request.response.close();
+      } catch (_) {}
+    }
+  }
+
+  /// 处理 /onPasteImage POST 请求 - 接收客户端粘贴的图片并保存到下载目录
+  Future<void> _handleOnPasteImage(HttpRequest request) async {
+    try {
+      if (request.method != 'POST') {
+        request.response
+          ..statusCode = HttpStatus.methodNotAllowed
+          ..write('Method Not Allowed');
+        request.response.close();
+        return;
+      }
+
+      // 从请求头中获取文件名
+      final fileName = request.headers.value('x-filename') ??
+          'paste_image_${DateTime.now().millisecondsSinceEpoch}.png';
+      final decodedFileName = Uri.decodeComponent(fileName);
+
+      // 读取整个请求体作为图片数据
+      final bytes = await _collectRequestBytes(request);
+
+      if (bytes.isEmpty) {
+        request.response
+          ..statusCode = HttpStatus.badRequest
+          ..write('Empty body');
+        request.response.close();
+        return;
+      }
+
+      // 保存到下载目录
+      final downloadDir = await getPasteFileDownloadDir();
+      final savePath = _getUniqueFilePath(downloadDir, decodedFileName);
+      await File(savePath).writeAsBytes(bytes);
+
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType.json
+        ..write(json.encode({'saved': 1, 'path': savePath}));
+      request.response.close();
+
+      showSuccessSnackbar('收到粘贴图片', '已保存到 ${p.basename(savePath)}');
+      _logger.i('$_tag 保存粘贴图片: $savePath');
+    } catch (e) {
+      _logger.e('$_tag 处理 /onPasteImage 请求失败', error: e);
+      try {
+        request.response
+          ..statusCode = HttpStatus.internalServerError
+          ..write('Internal Server Error: $e');
+        request.response.close();
+      } catch (_) {}
+    }
+  }
+
+  /// 处理 /getPasteImage GET 请求 - 从内存中返回粘贴的图片数据
+  Future<void> _handleGetPasteImage(HttpRequest request) async {
+    try {
+      if (nowPasteImageData == null || nowPasteImageData!.isEmpty) {
+        request.response
+          ..statusCode = HttpStatus.notFound
+          ..headers.contentType = ContentType.json
+          ..write(json.encode({'error': 'No paste image available'}));
+        request.response.close();
+        return;
+      }
+
+      final fileName = nowPasteImageFileName ??
+          'paste_image_${DateTime.now().millisecondsSinceEpoch}.png';
+      final encodedFileName = Uri.encodeComponent(fileName);
+
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.set(HttpHeaders.contentTypeHeader, 'application/octet-stream')
+        ..headers.set(
+          HttpHeaders.contentLengthHeader,
+          nowPasteImageData!.length.toString(),
+        )
+        ..headers.set(
+          'content-disposition',
+          'attachment; filename*=UTF-8\'\'$encodedFileName',
+        );
+
+      request.response.add(nowPasteImageData!);
+      await request.response.close();
+
+      _logger.i('$_tag 返回粘贴图片: $fileName (${nowPasteImageData!.length} bytes)');
+    } catch (e) {
+      _logger.e('$_tag 处理 /getPasteImage 请求失败', error: e);
+      try {
+        request.response
+          ..statusCode = HttpStatus.internalServerError
+          ..write('Internal Server Error: $e');
+        request.response.close();
+      } catch (_) {}
+    }
+  }
+
+  /// 获取不重名的文件路径（若重名则添加后缀）
+  String _getUniqueFilePath(String dirPath, String fileName) {
+    var filePath = p.join(dirPath, fileName);
+    if (!File(filePath).existsSync()) return filePath;
+
+    final nameWithoutExt = p.basenameWithoutExtension(fileName);
+    final ext = p.extension(fileName);
+    int counter = 1;
+    while (File(filePath).existsSync()) {
+      filePath = p.join(dirPath, '$nameWithoutExt($counter)$ext');
+      counter++;
+    }
+    return filePath;
+  }
+
+  /// 收集请求体所有字节
+  Future<List<int>> _collectRequestBytes(HttpRequest request) async {
+    final completer = Completer<List<int>>();
+    final bytes = <int>[];
+    request.listen(
+      bytes.addAll,
+      onDone: () => completer.complete(bytes),
+      onError: completer.completeError,
+    );
+    return completer.future;
   }
 
   /// 处理根据 ID 下载文件的请求

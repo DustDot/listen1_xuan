@@ -39,13 +39,17 @@ Future<Map<String, dynamic>> outputAllSettingsToFile([
         }
     }
   }
+  settings[SettingsController.lyricHiveStoreKey] = await s
+      .exportLyricBoxToString();
   if (toJsonString) {
     settings.remove('githubOauthAccessKey');
     return settings;
   }
   // 申请所有文件访问权限
-  if (await Permission.manageExternalStorage.request().isGranted ||
-      await Permission.storage.request().isGranted) {
+  if ((isAndroid &&
+          await Permission.manageExternalStorage.request().isGranted) ||
+      (isMobile && await Permission.storage.request().isGranted) ||
+      isDesktop) {
     try {
       // 确保路径存在
       final outputPath = await xuanGetdownloadDirectory(path: 'settings.json');
@@ -100,6 +104,10 @@ Future<void> importSettingsFromFile(
               logger.e('Error saving key $key: $e');
             }
             break;
+
+          case SettingsController.lyricHiveStoreKey:
+            await s.importLyricBoxFromString(settings[key]);
+            break;
           default:
             try {
               if (settings[key] is String) throw "String! :${settings[key]}";
@@ -140,12 +148,15 @@ Future<void> importSettingsFromFile(
     return;
   }
   // 申请所有文件访问权限
-  if (await Permission.manageExternalStorage.request().isGranted ||
-      await Permission.storage.request().isGranted) {
+  if ((isAndroid &&
+          await Permission.manageExternalStorage.request().isGranted) ||
+      (isMobile && await Permission.storage.request().isGranted) ||
+      isDesktop) {
     try {
       // 弹出系统文件选择器选择文件
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.any,
+      FilePickerResult? result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ["json"],
       );
 
       if (result != null && result.files.single.path != null) {
@@ -204,7 +215,7 @@ void g_launchURL(Uri url) async {
   }
 }
 
-Map<String, dynamic> settings_getsettings() {
+Map<String, dynamic> lengcyGetSettings() {
   return Get.find<SettingsController>().settings;
 }
 
@@ -217,31 +228,23 @@ Future<String?> outputPlatformToken(String platform) async {
 }
 
 Future<void> savePlatformToken(
-  String platform,
-  String token, {
+  PlatformCredentials credentials, {
   bool saveRightNow = true,
 }) async {
   try {
-    if (platform == 'github') {
+    if (credentials.platform == PlantformCodes.github) {
       final s = Get.find<SettingsController>();
-      await s.setString('githubOauthAccessKey', token);
+      await s.setString('githubOauthAccessKey', credentials.token);
       return;
     }
     final settings = Get.find<SettingsController>().settings;
-    settings[platform] = token;
+    settings[credentials.platform] = credentials.token;
+    // debugPrint('Saved platform token for ${credentials.platform}: ${credentials.token}');
     if (saveRightNow) Get.find<SettingsController>().saveSettings();
-    List<Cookie> cookies = [];
-    for (var item in token.split(';')) {
-      // 除去两端空格
-      var cookie = item.trim().split('=');
-      var cookieName = cookie[0].trim();
-      var cookieValue = cookie[1].trim();
-      cookies.add(Cookie(cookieName, cookieValue));
-    }
 
-    if (_cookieUrls.containsKey(platform)) {
-      for (var url in _cookieUrls[platform]!) {
-        await setSaveCookie(url: url, cookies: cookies);
+    if (_cookieUrls.containsKey(credentials.platform)) {
+      for (var url in _cookieUrls[credentials.platform]!) {
+        await setSaveCookie(url: url, cookies: credentials.prcdCookies);
       }
     }
     await Get.find<DioController>().reloadCookie();
@@ -368,12 +371,13 @@ open "$appPath"
 
 Future<void> outputPlaylistToGithubGist() async {
   if (Github.status != 2) {
-    // _msg('请先登录Github', 1.0);
-    showInfoSnackbar('请先登录Github', '');
-    return;
+    await Github.updateStatus();
+    if (Github.status != 2) {
+      showInfoSnackbar('请先登录Github', '');
+      return;
+    }
   }
   var playlists = await Github.listExistBackup();
-  print(playlists);
 
   try {
     showDialog(
@@ -455,4 +459,51 @@ Future<void> outputPlaylistToGithubGist() async {
   } catch (e) {
     showErrorSnackbar('添加失败', '$e');
   }
+}
+
+Future<void> showLyricBackgroundBlurRadiusInputDialog({
+  bool disableBackgroundShadow = false,
+}) async {
+  await showInputDialog(
+    title: '歌词背景高斯模糊距离',
+    message: '数值越大,模糊效果越明显',
+    initialValue: Get.find<SettingsController>().lyricBackgroundBlurRadius
+        .toString(),
+    onConfirm: (value) async {
+      if (isEmpty(value)) return false;
+      double? intValue = double.tryParse(value);
+      if (intValue == null || intValue < 0) {
+        throw '请输入有效的数值';
+      }
+      Get.find<SettingsController>().lyricBackgroundBlurRadius = intValue
+          .toDouble();
+      showSuccessSnackbar('设置成功', null);
+      return disableBackgroundShadow ? false : true;
+    },
+    keyboardType: TextInputType.number,
+    disableBackgroundShadow: disableBackgroundShadow,
+  );
+}
+
+Future<void> showShowSearchAreaWidthInputDialog({
+  bool disableBackgroundShadow = false,
+}) async {
+  await showInputDialog(
+    title: '当左边栏大于一定宽度时隐藏搜索页面的搜索框',
+    message: '数值越大,模糊效果越明显',
+    initialValue: Get.find<SettingsController>().showSearchAreaWidth
+        .toStringAsFixed(2),
+    onConfirm: (value) async {
+      if (isEmpty(value)) return false;
+      double? intValue = double.tryParse(value);
+      if (intValue == null || intValue < 0) {
+        throw '请输入有效的数值';
+      }
+      Get.find<SettingsController>().showSearchAreaWidth = intValue;
+      showSuccessSnackbar('设置成功', null);
+      return disableBackgroundShadow ? false : true;
+    },
+    keyboardType: TextInputType.number,
+    disableBackgroundShadow: disableBackgroundShadow,
+  );
 }

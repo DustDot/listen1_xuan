@@ -3,7 +3,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:hive/hive.dart';
 
@@ -21,22 +20,27 @@ import 'package:listen1_xuan/models/Track.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../bl.dart';
-import '../const.dart';
+import '../constants/const.dart';
 import '../global_settings_animations.dart';
+import '../kugou.dart';
 import '../main.dart';
+import '../models/Equalizer/EqSetting.dart';
 import '../models/Playlist.dart';
 import '../models/SongReplaceSettings.dart';
 import '../netease.dart';
 import '../qq.dart';
 import '../settings.dart';
-import 'myPlaylist_controller.dart';
 
 class SettingsController extends GetxController {
   static const String hiveStoreKey = 'hive_store';
+  static const String lyricHiveStoreKey = 'lyric_store';
   bool useHive = false;
   Box<dynamic>? box;
+  Box<dynamic>? lyricBox;
   final prefs = SharedPreferencesAsync();
   final settings = <String, dynamic>{}.obs;
+  final Completer<void> _dioInitCompleter = Completer<void>();
+  Future<void> get dioInitFuture => _dioInitCompleter.future;
   static const String lyricBorderRadiusHKey = 'lyric_border_radius_h';
   static const String lyricBorderRadiusVKey = 'lyric_border_radius_v';
   double get lyricBorderRadiusH => settings[lyricBorderRadiusHKey] ?? 20.0;
@@ -121,10 +125,13 @@ class SettingsController extends GetxController {
     }
   }
 
+  static const String lyricBackgroundBlurRadiusKey =
+      'lyricBackgroundBlurRadius';
+  final RxnDouble lyricBackgroundBlurRadiusRx = RxnDouble();
   double get lyricBackgroundBlurRadius =>
-      settings['lyricBackgroundBlurRadius'] ?? (globalHorizon ? 20.0 : 10.0);
+      lyricBackgroundBlurRadiusRx.value ?? (globalHorizon ? 20.0 : 10.0);
   set lyricBackgroundBlurRadius(double value) {
-    settings['lyricBackgroundBlurRadius'] = value;
+    settings[lyricBackgroundBlurRadiusKey] = value;
   }
 
   static const String globalLyricDelayKey = 'globalLyricDelay';
@@ -138,6 +145,21 @@ class SettingsController extends GetxController {
   bool get hideOrMinimize => settings['hideOrMinimize'] ?? true;
   set hideOrMinimize(bool value) {
     settings['hideOrMinimize'] = value;
+  }
+
+  static const String disableOpacityInLyricPageKey =
+      'disableOpacityInLyricPage';
+  final RxBool disableOpacityInLyricPageRx = false.obs;
+  bool get disableOpacityInLyricPage => disableOpacityInLyricPageRx.value;
+  set disableOpacityInLyricPage(bool value) {
+    settings[disableOpacityInLyricPageKey] = value;
+  }
+
+  static const String showSearchAreaWidthKey = 'showSearchAreaWidth';
+  final RxDouble showSearchAreaWidthRx = 200.0.obs;
+  double get showSearchAreaWidth => showSearchAreaWidthRx.value;
+  set showSearchAreaWidth(double value) {
+    settings[showSearchAreaWidthKey] = value;
   }
 
   static const String searchUseLastSourceKey = 'searchUseLastSource';
@@ -241,8 +263,13 @@ class SettingsController extends GetxController {
   ///歌曲替换按钮位置及大小设置
   static const String songReplaceFabLocationKey = 'songReplaceFabLocation';
   static const String songReplaceFabMiniKey = 'songReplaceFabMini';
+
+  final RxInt songReplaceFabLocationIndexRx =
+      SongReplaceFabLocation.startFloat.index.obs;
+  final RxBool songReplaceFabMiniRx = true.obs;
+
   SongReplaceFabLocation get songReplaceFabLocation {
-    int? locationIndex = settings[songReplaceFabLocationKey];
+    final int locationIndex = songReplaceFabLocationIndexRx.value;
     return SongReplaceFabLocation.values.firstWhere(
       (element) => element.index == locationIndex,
       orElse: () => SongReplaceFabLocation.startFloat,
@@ -253,7 +280,7 @@ class SettingsController extends GetxController {
     settings[songReplaceFabLocationKey] = location.index;
   }
 
-  bool get songReplaceFabMini => settings[songReplaceFabMiniKey] ?? true;
+  bool get songReplaceFabMini => songReplaceFabMiniRx.value;
   set songReplaceFabMini(bool value) {
     settings[songReplaceFabMiniKey] = value;
   }
@@ -266,12 +293,31 @@ class SettingsController extends GetxController {
     settings[songReplaceAutoRepTragetTrackInAllPlaylistKey] = value;
   }
 
+  static const String disableLyricDownloadKey = 'disableLyricDownload';
+  bool get disableLyricDownload => settings[disableLyricDownloadKey] ?? false;
+  set disableLyricDownload(bool value) {
+    settings[disableLyricDownloadKey] = value;
+  }
+
+  static const String disableSongDownloadKey = 'disableSongDownload';
+  bool get disableSongDownload => settings[disableSongDownloadKey] ?? false;
+  set disableSongDownload(bool value) {
+    settings[disableSongDownloadKey] = value;
+  }
+
   static const String windowsCloseBtnCloseOrHideAppKey =
       'windowsCloseBtnCloseOrHideApp';
+  final RxnBool windowsCloseBtnCloseOrHideAppRx = RxnBool();
   bool? get windowsCloseBtnCloseOrHideApp =>
-      settings[windowsCloseBtnCloseOrHideAppKey];
+      windowsCloseBtnCloseOrHideAppRx.value;
   set windowsCloseBtnCloseOrHideApp(bool? value) {
     settings[windowsCloseBtnCloseOrHideAppKey] = value;
+  }
+
+  void completeDioInit() {
+    if (!_dioInitCompleter.isCompleted) {
+      _dioInitCompleter.complete();
+    }
   }
 
   static const String supabaseBackupPlayListUpdateIdMapKey =
@@ -306,6 +352,74 @@ class SettingsController extends GetxController {
     settings[getPreReleaseKey] = value;
   }
 
+  static const String stopOnPlayListEndKey = 'stopOnPlayListEnd';
+  bool get stopOnPlayListEnd {
+    return settings[stopOnPlayListEndKey] ?? false;
+  }
+
+  set stopOnPlayListEnd(bool value) {
+    settings[stopOnPlayListEndKey] = value;
+  }
+
+  static const String volumnFollowSystemKey = 'volumnFollowSystem';
+  final RxBool volumnFollowSystemRx = false.obs;
+  bool get volumnFollowSystem => volumnFollowSystemRx.value;
+  set volumnFollowSystem(bool? value) {
+    settings[volumnFollowSystemKey] = value;
+  }
+
+  final RxBool volumnFollowSystemChanging = false.obs;
+
+  static const String eqSettingKey = 'eqSetting';
+  final RxString _eqSettingJsonRx = ''.obs;
+  final Rx<EqSetting> eqSettingRx = Rx<EqSetting>(EqSetting());
+  EqSetting get eqSetting => eqSettingRx.value;
+
+  set eqSetting(EqSetting value) {
+    settings[eqSettingKey] = jsonEncode(value.toJson());
+  }
+
+  static const String disableSomeEffectWhenInactiveKey =
+      'disableSomeEffectWhenInactive';
+  final RxBool disableSomeEffectWhenInactiveRx = true.obs;
+  bool get disableSomeEffectWhenInactive =>
+      disableSomeEffectWhenInactiveRx.value;
+
+  set disableSomeEffectWhenInactive(bool value) {
+    settings[disableSomeEffectWhenInactiveKey] = value;
+  }
+
+  static const String copyErrorMessageKey = 'copyErrorMessage';
+  final RxBool copyErrorMessageRx = false.obs;
+  bool get copyErrorMessage => copyErrorMessageRx.value;
+  set copyErrorMessage(bool value) {
+    settings[copyErrorMessageKey] = value;
+  }
+
+  static const String showTimeInNotifyAblKey = 'showTimeInNotify';
+  final RxBool showTimeInNotifyRx = false.obs;
+  bool get showTimeInNotify => showTimeInNotifyRx.value;
+  set showTimeInNotify(bool value) {
+    settings[showTimeInNotifyAblKey] = value;
+  }
+
+  static const String selectAudioQualityOfBLKey = 'selectAudioQualityOfBL';
+  final RxInt selectAudioQualityOfBLRx = AudioQualityOfBL.k192.code.obs;
+  AudioQualityOfBL get selectAudioQualityOfBL =>
+      AudioQualityCode.fromCode(selectAudioQualityOfBLRx.value) ??
+      AudioQualityOfBL.k192;
+
+  set selectAudioQualityOfBL(AudioQualityOfBL value) {
+    settings[selectAudioQualityOfBLKey] = value.code;
+  }
+
+  static const String sendImgWhenOpenImgDialogKey = 'sendImgWhenOpenImgDialog';
+  final RxBool sendImgWhenOpenImgDialogRx = true.obs;
+  bool get sendImgWhenOpenImgDialog => sendImgWhenOpenImgDialogRx.value;
+  set sendImgWhenOpenImgDialog(bool value) {
+    settings[sendImgWhenOpenImgDialogKey] = value;
+  }
+
   final String CacheController_localCacheListKey = 'local-cache-list';
   final CacheController_localCacheList = <String, String>{};
   var PlayController_player_settings = <String, dynamic>{};
@@ -320,6 +434,89 @@ class SettingsController extends GetxController {
     super.onInit();
     debounce(settings, (callback) {
       saveSettings();
+    });
+    debounce(
+      showTimeInNotifyRx,
+      (enable) => Get.find<PlayController>().showTimeInAlbum(enable),
+    );
+    ever<Map<String, dynamic>>(settings, (_) {
+      final nextMini = settings[songReplaceFabMiniKey] as bool? ?? true;
+      final nextLocationIndex =
+          settings[songReplaceFabLocationKey] as int? ??
+          SongReplaceFabLocation.startFloat.index;
+      final nextWindowsCloseBtnCloseOrHideApp =
+          settings[windowsCloseBtnCloseOrHideAppKey] as bool?;
+      final nextDisableOpacityInLyricPage =
+          settings[disableOpacityInLyricPageKey] as bool? ?? false;
+      final nextLyricBackgroundBlurRadius =
+          (settings[lyricBackgroundBlurRadiusKey] as num?)?.toDouble();
+      final nextVolumnFollowSystem =
+          settings[volumnFollowSystemKey] as bool? ?? false;
+      final nextShowSearchAreaWidth =
+          (settings[showSearchAreaWidthKey] as num?)?.toDouble() ?? 200.0;
+      final copyErrorMessage = settings[copyErrorMessageKey] as bool? ?? false;
+
+      final eqSettingJson = settings[eqSettingKey] as String? ?? '';
+      final nextDisableSomeEffectWhenInactive =
+          settings[disableSomeEffectWhenInactiveKey] as bool? ?? true;
+      final nextShowTimeInNotify =
+          settings[showTimeInNotifyAblKey] as bool? ?? false;
+      final nextSelectAudioQualityOfBL =
+          settings[selectAudioQualityOfBLKey] as int? ??
+          AudioQualityOfBL.k192.code;
+      final nextSendImgWhenOpenImgDialog =
+          settings[sendImgWhenOpenImgDialogKey] as bool? ?? true;
+
+      if (songReplaceFabMiniRx.value != nextMini) {
+        songReplaceFabMiniRx.value = nextMini;
+      }
+      if (songReplaceFabLocationIndexRx.value != nextLocationIndex) {
+        songReplaceFabLocationIndexRx.value = nextLocationIndex;
+      }
+      if (windowsCloseBtnCloseOrHideAppRx.value !=
+          nextWindowsCloseBtnCloseOrHideApp) {
+        windowsCloseBtnCloseOrHideAppRx.value =
+            nextWindowsCloseBtnCloseOrHideApp;
+      }
+      if (disableOpacityInLyricPageRx.value != nextDisableOpacityInLyricPage) {
+        disableOpacityInLyricPageRx.value = nextDisableOpacityInLyricPage;
+      }
+      if (lyricBackgroundBlurRadiusRx.value != nextLyricBackgroundBlurRadius) {
+        lyricBackgroundBlurRadiusRx.value = nextLyricBackgroundBlurRadius;
+      }
+      if (volumnFollowSystemRx.value != nextVolumnFollowSystem) {
+        volumnFollowSystemRx.value = nextVolumnFollowSystem;
+      }
+      if (showSearchAreaWidthRx.value != nextShowSearchAreaWidth) {
+        showSearchAreaWidthRx.value = nextShowSearchAreaWidth;
+      }
+      if (_eqSettingJsonRx.value != eqSettingJson) {
+        _eqSettingJsonRx.value = eqSettingJson;
+        try {
+          final eqSettingMap =
+              jsonDecode(eqSettingJson) as Map<String, dynamic>;
+          eqSettingRx.value = EqSetting.fromJson(eqSettingMap);
+        } catch (e) {
+          logger.e('Failed to parse eqSetting JSON: $e');
+        }
+      }
+      if (disableSomeEffectWhenInactiveRx.value !=
+          nextDisableSomeEffectWhenInactive) {
+        disableSomeEffectWhenInactiveRx.value =
+            nextDisableSomeEffectWhenInactive;
+      }
+      if (copyErrorMessageRx.value != copyErrorMessage) {
+        copyErrorMessageRx.value = copyErrorMessage;
+      }
+      if (showTimeInNotifyRx.value != nextShowTimeInNotify) {
+        showTimeInNotifyRx.value = nextShowTimeInNotify;
+      }
+      if (selectAudioQualityOfBLRx.value != nextSelectAudioQualityOfBL) {
+        selectAudioQualityOfBLRx.value = nextSelectAudioQualityOfBL;
+      }
+      if (nextSendImgWhenOpenImgDialog != sendImgWhenOpenImgDialogRx.value) {
+        sendImgWhenOpenImgDialogRx.value = nextSendImgWhenOpenImgDialog;
+      }
     });
 
     // 监听 showLyricTranslation 变化并保存到 settings
@@ -343,22 +540,94 @@ class SettingsController extends GetxController {
 
   Future<void> initFlutterHive() async {
     try {
-      if (isWindows) {
-        final path = p.join(
-          ((await getApplicationSupportDirectory()).path),
-          'hive_data',
-        );
-        if (!(await Directory(path).exists())) {
-          await Directory(path).create(recursive: true);
-        }
-        logger.i(path);
-        Hive.init(path);
-        box = await Hive.openBox(SettingsController.hiveStoreKey);
-        useHive = true;
+      // if (isWindows) {
+      final path = p.join(
+        ((await getApplicationSupportDirectory()).path),
+        'hive_data',
+      );
+      if (!(await Directory(path).exists())) {
+        await Directory(path).create(recursive: true);
       }
+      logger.i(path);
+      Hive.init(path);
+      box = await Hive.openBox(SettingsController.hiveStoreKey);
+      useHive = true;
+
+      try {
+        lyricBox = await Hive.openBox(SettingsController.lyricHiveStoreKey);
+      } catch (e) {
+        logger.e('Init Hive lyricBox failed:$e');
+      }
+      // }
     } catch (e) {
       logger.e('Init Hive failed:$e');
     }
+  }
+
+  bool get useLyricBox => useHive && lyricBox != null;
+
+  String? getLyricBoxString(String key) {
+    if (!useLyricBox) return null;
+    if (!lyricBox!.containsKey(key)) return null;
+    final value = lyricBox!.get(key);
+    return value is String ? value : null;
+  }
+
+  Future<void> setLyricBoxString(String key, String value) async {
+    if (!useLyricBox) return;
+    await lyricBox!.put(key, value);
+  }
+
+  /// 导出 lyricBox 的所有数据到字符串（JSON）
+  ///
+  /// 仅导出 JSON 可编码的数据；遇到不可编码的值会跳过，以避免导出失败。
+  Future<String> exportLyricBoxToString() async {
+    if (!useLyricBox) return '{}';
+
+    final exportData = <String, dynamic>{};
+    for (final key in lyricBox!.keys) {
+      final stringKey = key.toString();
+      final value = lyricBox!.get(key);
+      try {
+        jsonEncode(value);
+        exportData[stringKey] = value;
+      } catch (e) {
+        logger.w('Skip non-JSON-encodable lyricBox entry: $stringKey ($e)');
+      }
+    }
+
+    return jsonEncode({'version': 1, 'data': exportData});
+  }
+
+  /// 从字符串（JSON）导入 lyricBox 的所有数据
+  ///
+  /// 默认会先清空现有 lyricBox 数据再导入。
+  Future<void> importLyricBoxFromString(
+    String content, {
+    bool clearExisting = true,
+  }) async {
+    if (!useLyricBox) return;
+
+    final decoded = jsonDecode(content);
+    Map<String, dynamic>? data;
+
+    if (decoded is Map) {
+      if (decoded['data'] is Map) {
+        data = Map<String, dynamic>.from(decoded['data'] as Map);
+      } else {
+        data = Map<String, dynamic>.from(decoded);
+      }
+    }
+
+    if (data == null) {
+      throw 'lyricBox 导入失败：内容不是有效的 JSON 对象';
+    }
+
+    if (clearExisting) {
+      await lyricBox!.clear();
+    }
+
+    await lyricBox!.putAll(data);
   }
 
   Future<void> loadSettings() async {
@@ -367,6 +636,44 @@ class SettingsController extends GetxController {
     } else {
       await _loadSettingsAwait();
     }
+  }
+
+  Future<Set<String>> getMayUseFulKeys() async {
+    Set<String> playlists = {};
+    Set<String> k = await getKeys();
+    for (var key in k) {
+      switch (key) {
+        case 'local-cache-list':
+          continue;
+        default:
+          if (key.startsWith('flutter.') ||
+              key.startsWith('supabase.') ||
+              key.contains('token')) {
+            continue;
+          }
+          playlists.add(key);
+      }
+    }
+    return playlists;
+  }
+
+  Future<Set<String>> getMyPlayLists() async {
+    Set<String> keys = await getMayUseFulKeys();
+
+    return keys.where((key) => key.startsWith('myplaylist_')).toSet();
+  }
+
+  Future<Set<String>> getPlayLists() async {
+    Set<String> keys = await getMayUseFulKeys();
+    Set<String> allPlantformPlaylistKeys = {
+      ...BLPlaylistType.values.map((e) => e.prefix),
+      ...NePlaylistType.values.map((e) => e.prefix),
+      ...KgPlaylistType.values.map((e) => e.prefix),
+      ...QQPlaylistType.values.map((e) => e.prefix),
+    };
+    return keys
+        .where((key) => allPlantformPlaylistKeys.contains(key.split('_')[0]))
+        .toSet();
   }
 
   /// 直接顺序加载设置（不使用 compute，用于 debug 模式）
@@ -633,6 +940,13 @@ class SettingsController extends GetxController {
     await setString('settings', jsonString);
   }
 
+  @override
+  void onClose() {
+    box?.close();
+    lyricBox?.close();
+    super.onClose();
+  }
+
   setSettings(Map<String, dynamic> settings) {
     this.settings.addAll(settings);
   }
@@ -661,9 +975,6 @@ class SettingsController extends GetxController {
       );
       // });
     } catch (e) {
-      // _readmeContent_setstate(() {
-      //   _readmeContent = '加载失败';
-      // });
       readmeContent.value = '加载失败';
     }
   }
@@ -672,6 +983,8 @@ class SettingsController extends GetxController {
   final loginData = <String, dynamic>{}.obs;
   final loginDataLoading = Set().obs;
   Future<void> refreshLoginData() async {
+    await dioInitFuture;
+
     final tasks = Future.wait([
       Future.microtask(() async {
         loginDataLoading.add(PlantformCodes.bl);
@@ -793,6 +1106,12 @@ class SettingsController extends GetxController {
     }
   }
 
+  static const String lyricStyleKey = 'lyric_style';
+  String get lyricStyle => settings[lyricStyleKey] ?? '{}';
+  set lyricStyle(String value) {
+    settings[lyricStyleKey] = value;
+  }
+
   bool get use => useHive && box != null;
 
   // === HiveBox Or SharedPreferences ===
@@ -870,6 +1189,27 @@ class SettingsController extends GetxController {
         return allKeys.where((key) => allowList.contains(key)).toSet();
       } else {
         return await prefs.getKeys();
+      }
+    }
+  }
+
+  Future<void> remove({String? key, Iterable<String>? keys}) async {
+    if (use) {
+      if (key != null) {
+        await box!.delete(key);
+      }
+      if (keys != null) {
+        for (var k in keys) {
+          await box!.delete(k);
+        }
+      }
+    }
+    if (key != null) {
+      await prefs.remove(key);
+    }
+    if (keys != null) {
+      for (var k in keys) {
+        await prefs.remove(k);
       }
     }
   }

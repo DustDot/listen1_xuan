@@ -1,12 +1,16 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide CircularProgressIndicator;
+import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:get/get.dart';
 import 'package:listen1_xuan/controllers/controllers.dart';
 import 'package:listen1_xuan/funcs.dart';
 import 'package:listen1_xuan/global_settings_animations.dart';
+import 'package:listen1_xuan/widgets/ext/ext_widget.dart';
+import '../widgets/progress_indicator_xuan.dart';
+
 import 'package:listen1_xuan/play.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -45,11 +49,29 @@ void addAndCleanReapeatRoute(Route route, String name) {
   top_routeWithName.add(routeWithName(route, name));
 }
 
+class _SheetAwareInnerRoutePopScope extends StatelessWidget {
+  const _SheetAwareInnerRoutePopScope({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final playController = Get.find<PlayController>();
+    return ListenableBuilder(
+      listenable: playController.sheetController,
+      child: child,
+      builder: (context, child) =>
+          PopScope(canPop: playController.canPopInnerRoute, child: child!),
+    );
+  }
+}
+
 class ListenPopMiddleware extends GetMiddleware {
   @override
   Widget onPageBuilt(Widget page) {
-    Get.find<PlayController>().collapseSheet();
-    return page;
+    final playController = Get.find<PlayController>();
+    playController.collapseSheet();
+    return _SheetAwareInnerRoutePopScope(child: page);
   }
 
   @override
@@ -64,7 +86,7 @@ class ListenPopMiddleware extends GetMiddleware {
 }
 
 int last_pop_time = 0;
-void router_pop() {
+void routerPop() {
   debugPrint("didPop: didPop,");
   if (Get.find<PlayController>().tryCollapseSheet()) return;
   if (top_routeWithName.isNotEmpty) {
@@ -102,11 +124,29 @@ Future<void> closeApp() async {
 
   void performExit() {
     Get.back();
-    if (kDebugMode) {
-      print("exit(0)");
+    // if (kDebugMode) {
+    // print("exit(0)");
+    // } else {
+    if (isDesktop) {
+      windowManager
+          .hide()
+          .then((_) {
+            exit(0);
+          })
+          .catchError((e) {
+            exit(0);
+          });
     } else {
-      exit(0);
+      SystemChannels.platform
+          .invokeMethod('SystemNavigator.pop')
+          .then((_) {
+            exit(0);
+          })
+          .catchError((e) {
+            exit(0);
+          });
     }
+    // }
   }
 
   Get.dialog(
@@ -128,16 +168,12 @@ Future<void> closeApp() async {
                 if (settingsSaved.value)
                   Icon(Icons.check_circle, color: Get.theme.colorScheme.primary)
                 else
-                  SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                SizedBox(width: 12),
+                  CircularProgressIndicator(strokeWidth: 2).sbs(24),
+                12.sbw,
                 Text('保存设置'),
               ],
             ),
-            SizedBox(height: 12),
+            12.sbh,
             Row(
               children: [
                 if (continuePlaysaved.value)
@@ -145,12 +181,8 @@ Future<void> closeApp() async {
                 else if (timeoutReached.value)
                   Icon(Icons.warning, color: Get.theme.colorScheme.error)
                 else
-                  SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                SizedBox(width: 12),
+                  CircularProgressIndicator(strokeWidth: 2).sbs(24),
+                12.sbw,
                 Text(
                   timeoutReached.value && !continuePlaysaved.value
                       ? '同步超时'
@@ -184,7 +216,8 @@ Future<void> closeApp() async {
       Get.find<PlayController>().positionInMilliseconds.value;
   // 并行执行两个任务
   Future.wait([
-    Get.find<SettingsController>().saveSettings().then((_) {
+    Get.find<SettingsController>().saveSettings().then((_) async {
+      await Get.find<SettingsController>().box?.close();
       settingsSaved.value = true;
     }),
     Get.find<PlayController>().updateContinuePlay(onlyPlaying: true).then((
@@ -197,6 +230,7 @@ Future<void> closeApp() async {
 
 class RouteController extends GetxController {
   RxBool inLyricPage = false.obs;
+  RxBool inSearchPage = false.obs;
   RxBool inNowPlayListPage = false.obs;
   RxBool inSongReplacePage = false.obs;
   @override
@@ -204,12 +238,15 @@ class RouteController extends GetxController {
     super.onInit();
     ever(top_routeWithName, (callback) {
       inLyricPage.value = false;
+      inSearchPage.value = false;
       inNowPlayListPage.value = false;
       inSongReplacePage.value = false;
       if (top_routeWithName.isNotEmpty) {
         switch (top_routeWithName.last.name) {
           case RouteName.lyricPage:
             inLyricPage.value = true;
+          case RouteName.searchPage:
+            inSearchPage.value = true;
           case RouteName.nowPlayingPage:
             inNowPlayListPage.value = true;
           case RouteName.songReplacePage:
@@ -231,5 +268,6 @@ class RouteName {
   static const String supabaseLoginPage = '/supabase_login';
   static const String supabasePasswordLoginPage = '/supabase_password_login';
   static const String cacheNamingPage = '/cache_naming';
+  static const String equalizerPage = '/equalizer';
   static const String songReplacePage = '/song_replace';
 }

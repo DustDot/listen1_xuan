@@ -1,12 +1,15 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide CircularProgressIndicator;
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:listen1_xuan/controllers/paste_controller.dart';
 import 'package:listen1_xuan/controllers/websocket_card_controller.dart';
 import 'package:listen1_xuan/controllers/BroadcastWsController.dart';
 import 'package:listen1_xuan/funcs.dart';
 import 'package:listen1_xuan/global_settings_animations.dart';
+import 'package:listen1_xuan/widgets/ext/ext_widget.dart';
 import 'package:wolt_modal_sheet/wolt_modal_sheet.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import '../widgets/progress_indicator_xuan.dart';
 
 /// WebSocket 服务器卡片组件
 /// 提供简洁的服务器状态显示和快速操作
@@ -41,7 +44,7 @@ class WebSocketServerCard extends StatelessWidget {
                       color: ctrl.isServerRunning ? Colors.green : Colors.grey,
                     );
                   }),
-                  const SizedBox(width: 8),
+                  8.sbw,
                   const Text(
                     'WebSocket 服务器',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -73,7 +76,7 @@ class WebSocketServerCard extends StatelessWidget {
                   }),
                 ],
               ),
-              const SizedBox(height: 12),
+              12.sbh,
               Obx(() {
                 final ctrl = Get.find<WebSocketCardController>(
                   tag: tag ?? 'websocket_card',
@@ -88,7 +91,7 @@ class WebSocketServerCard extends StatelessWidget {
                       style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                     ),
                     if (ctrl.isServerRunning) ...[
-                      const SizedBox(height: 4),
+                      4.sbh,
                       Text(
                         '连接数: ${ctrl.clientCount}',
                         style: TextStyle(fontSize: 14, color: Colors.grey[600]),
@@ -97,7 +100,7 @@ class WebSocketServerCard extends StatelessWidget {
                   ],
                 );
               }),
-              const SizedBox(height: 12),
+              12.sbh,
               Row(
                 children: [
                   Expanded(
@@ -129,7 +132,7 @@ class WebSocketServerCard extends StatelessWidget {
                       );
                     }),
                   ),
-                  const SizedBox(width: 8),
+                  8.sbw,
                   IconButton(
                     onPressed: () => WebSocketControlPanel.show(),
                     icon: const Icon(Icons.settings),
@@ -166,7 +169,7 @@ class WebSocketControlPanel {
                     color: ctrl.isServerRunning ? Colors.blue : Colors.grey,
                     size: 20,
                   ),
-                  const SizedBox(width: 8),
+                  8.sbw,
                   const Text('WebSocket 服务器控制面板'),
                   const Spacer(),
                   Container(
@@ -240,7 +243,7 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
               Row(
                 children: [
                   const Icon(Icons.qr_code_2, color: Colors.blue, size: 28),
-                  const SizedBox(width: 12),
+                  12.sbw,
                   const Expanded(
                     child: Text(
                       'WebSocket服务器连接',
@@ -258,7 +261,7 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
                 ],
               ),
 
-              const SizedBox(height: 20),
+              20.sbh,
 
               // 二维码
               Container(
@@ -279,7 +282,7 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
                 ),
               ),
 
-              const SizedBox(height: 20),
+              20.sbh,
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
@@ -315,7 +318,7 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
                 ],
               ),
 
-              const SizedBox(height: 20),
+              20.sbh,
 
               // 操作按钮
               Row(
@@ -338,7 +341,7 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  12.sbw,
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: () => Get.back(),
@@ -364,101 +367,98 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
   Widget build(BuildContext context) {
     final controller = Get.find<WebSocketCardController>();
 
-    return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.7,
-      child: Column(
-        children: [
-          // 服务器控制按钮行 (移到顶部)
-          Container(
-            padding: const EdgeInsets.all(16),
-            child: Obx(() {
-              final ctrl = Get.find<WebSocketCardController>();
-              return Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: ctrl.isStarting || ctrl.isStopping
-                          ? null
-                          : ctrl.isServerRunning
-                          ? ctrl.stopServer
-                          : ctrl.startServer,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: ctrl.isServerRunning
-                            ? Colors.red.withOpacity(0.9)
-                            : Colors.green.withOpacity(0.9),
-                        foregroundColor: Colors.white,
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      icon: Icon(
-                        ctrl.isStarting
-                            ? Icons.hourglass_empty
-                            : ctrl.isStopping
-                            ? Icons.hourglass_empty
-                            : ctrl.isServerRunning
-                            ? Icons.stop
-                            : Icons.play_arrow,
-                        size: 18,
-                      ),
-                      label: Text(
-                        ctrl.isStarting
-                            ? '启动中...'
-                            : ctrl.isStopping
-                            ? '停止中...'
-                            : ctrl.isServerRunning
-                            ? '停止服务器'
-                            : '启动服务器',
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  // 快速重启按钮
-                  ElevatedButton.icon(
-                    onPressed:
-                        ctrl.isStarting ||
-                            ctrl.isStopping ||
-                            !ctrl.isServerRunning
+    return Column(
+      children: [
+        // 服务器控制按钮行 (移到顶部)
+        Container(
+          padding: const EdgeInsets.all(16),
+          child: Obx(() {
+            final ctrl = Get.find<WebSocketCardController>();
+            return Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: ctrl.isStarting || ctrl.isStopping
                         ? null
-                        : () => _restartServer(ctrl),
+                        : ctrl.isServerRunning
+                        ? ctrl.stopServer
+                        : ctrl.startServer,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange.withOpacity(0.9),
+                      backgroundColor: ctrl.isServerRunning
+                          ? Colors.red.withOpacity(0.9)
+                          : Colors.green.withOpacity(0.9),
                       foregroundColor: Colors.white,
                       elevation: 2,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('重启', style: TextStyle(fontSize: 14)),
-                  ),
-                  const SizedBox(width: 12),
-                  // 二维码按钮
-                  ElevatedButton.icon(
-                    onPressed: () => _showQrCodeDialog(ctrl),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue.withOpacity(0.9),
-                      foregroundColor: Colors.white,
-                      elevation: 2,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                    icon: Icon(
+                      ctrl.isStarting
+                          ? Icons.hourglass_empty
+                          : ctrl.isStopping
+                          ? Icons.hourglass_empty
+                          : ctrl.isServerRunning
+                          ? Icons.stop
+                          : Icons.play_arrow,
+                      size: 18,
                     ),
-                    icon: const Icon(Icons.qr_code, size: 18),
-                    label: const Text('二维码', style: TextStyle(fontSize: 14)),
+                    label: Text(
+                      ctrl.isStarting
+                          ? '启动中...'
+                          : ctrl.isStopping
+                          ? '停止中...'
+                          : ctrl.isServerRunning
+                          ? '停止服务器'
+                          : '启动服务器',
+                      style: const TextStyle(fontSize: 14),
+                    ),
                   ),
-                ],
-              );
-            }),
-          ),
+                ),
+                12.sbw,
+                // 快速重启按钮
+                ElevatedButton.icon(
+                  onPressed:
+                      ctrl.isStarting ||
+                          ctrl.isStopping ||
+                          !ctrl.isServerRunning
+                      ? null
+                      : () => _restartServer(ctrl),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange.withOpacity(0.9),
+                    foregroundColor: Colors.white,
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('重启', style: TextStyle(fontSize: 14)),
+                ),
+                12.sbw,
+                // 二维码按钮
+                ElevatedButton.icon(
+                  onPressed: () => _showQrCodeDialog(ctrl),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.withOpacity(0.9),
+                    foregroundColor: Colors.white,
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: const Icon(Icons.qr_code, size: 18),
+                  label: const Text('二维码', style: TextStyle(fontSize: 14)),
+                ),
+              ],
+            );
+          }),
+        ),
 
-          // Tab 内容
-          Expanded(child: _buildConfigTab(controller)),
-        ],
-      ),
-    );
+        // Tab 内容
+        Expanded(child: _buildConfigTab(controller)),
+      ],
+    ).sbh(MediaQuery.of(context).size.height * 0.7);
   }
 
   Widget _buildConfigTab(WebSocketCardController controller) {
@@ -488,10 +488,10 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.orange.shade300),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
                     Icon(Icons.warning, color: Colors.orange),
-                    SizedBox(width: 8),
+                    8.sbw,
                     Expanded(
                       child: Text(
                         '服务器运行时不能修改配置',
@@ -517,7 +517,7 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
               ),
             ]),
 
-            const SizedBox(height: 24),
+            24.sbh,
             // 自动启动配置
             _buildConfigSection('启动配置', [
               Row(
@@ -534,7 +534,7 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              16.sbh,
               Row(
                 children: [
                   Expanded(
@@ -551,7 +551,7 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
               ),
             ]),
 
-            const SizedBox(height: 24),
+            24.sbh,
 
             _buildConfigSection('心跳配置', [
               _buildTextField(
@@ -565,7 +565,7 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
                   if (interval != null) ctrl.updatePingInterval(interval);
                 },
               ),
-              const SizedBox(height: 16),
+              16.sbh,
               _buildTextField(
                 controller: pongController,
                 label: 'Pong超时 (秒)',
@@ -592,7 +592,7 @@ class _WebSocketControlContentState extends State<WebSocketControlContent> {
           title,
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
-        const SizedBox(height: 12),
+        12.sbh,
         ...children,
       ],
     );
@@ -672,12 +672,13 @@ class WebSocketHelper {
           onPressed: () async {
             await showControlPanel();
           },
+          onLongPress: () => Get.find<PasteController>().trySendNowClip(),
         );
       }
 
       // 检查是否应该显示按钮
       if (inMainPage && !controller.wsServerBtnShow) {
-        return const SizedBox.shrink();
+        return SizedBox.shrink();
       }
 
       // 根据服务器状态确定图标颜色和状态
@@ -689,102 +690,78 @@ class WebSocketHelper {
         // 启动中 - 黄色
         iconColor = Colors.amber;
         currentTooltip = "WebSocket服务器 (启动中...)";
-        icon = SizedBox(
-          width: iconSize,
-          height: iconSize,
-          child: Stack(
-            children: [
-              Icon(
-                Icons.connected_tv_rounded,
-                color: iconColor,
-                size: iconSize,
-              ),
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  width: iconSize * 0.3,
-                  height: iconSize * 0.3,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.amber),
-                  ),
+        icon = Stack(
+          children: [
+            Icon(Icons.connected_tv_rounded, color: iconColor, size: iconSize),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: Container(
+                width: iconSize * 0.3,
+                height: iconSize * 0.3,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.amber),
                 ),
               ),
-            ],
-          ),
-        );
+            ),
+          ],
+        ).sbs(iconSize);
       } else if (controller.isStopping) {
         // 停止中 - 橙色
         iconColor = Colors.orange;
         currentTooltip = "WebSocket服务器 (停止中...)";
-        icon = SizedBox(
-          width: iconSize,
-          height: iconSize,
-          child: Stack(
-            children: [
-              Icon(
-                Icons.connected_tv_rounded,
-                color: iconColor,
-                size: iconSize,
-              ),
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  width: iconSize * 0.3,
-                  height: iconSize * 0.3,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-                  ),
+        icon = Stack(
+          children: [
+            Icon(Icons.connected_tv_rounded, color: iconColor, size: iconSize),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: Container(
+                width: iconSize * 0.3,
+                height: iconSize * 0.3,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
                 ),
               ),
-            ],
-          ),
-        );
+            ),
+          ],
+        ).sbs(iconSize);
       } else if (controller.isServerRunning) {
         // 运行中 - 绿色，显示客户端数量
         iconColor = Colors.green;
         currentTooltip = "WebSocket服务器 (运行中 - ${controller.clientCount}个客户端)";
-        icon = SizedBox(
-          width: iconSize,
-          height: iconSize,
-          child: Stack(
-            children: [
-              Icon(
-                Icons.connected_tv_rounded,
-                color: iconColor,
-                size: iconSize,
-              ),
-              if (controller.clientCount > 0)
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  child: Container(
-                    padding: EdgeInsets.all(1),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(8),
+        icon = Stack(
+          children: [
+            Icon(Icons.connected_tv_rounded, color: iconColor, size: iconSize),
+            if (controller.clientCount > 0)
+              Positioned(
+                right: 0,
+                top: 0,
+                child: Container(
+                  padding: EdgeInsets.all(1),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  constraints: BoxConstraints(
+                    minWidth: iconSize * 0.4,
+                    minHeight: iconSize * 0.4,
+                  ),
+                  child: Text(
+                    '${controller.clientCount}',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: iconSize * 0.25,
+                      fontWeight: FontWeight.bold,
                     ),
-                    constraints: BoxConstraints(
-                      minWidth: iconSize * 0.4,
-                      minHeight: iconSize * 0.4,
-                    ),
-                    child: Text(
-                      '${controller.clientCount}',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: iconSize * 0.25,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
-            ],
-          ),
-        );
+              ),
+          ],
+        ).sbs(iconSize);
       } else {
         // 未启动 - 灰色
         iconColor = Colors.grey;
@@ -820,12 +797,12 @@ class WebSocketHelper {
         controller = Get.find<WebSocketCardController>();
       } catch (e) {
         // 如果控制器不存在，不显示按钮
-        return const SizedBox.shrink();
+        return SizedBox.shrink();
       }
 
       // 检查是否应该显示按钮
       if (!controller.wsServerBtnShow) {
-        return const SizedBox.shrink();
+        return SizedBox.shrink();
       }
 
       // 根据服务器状态确定图标颜色

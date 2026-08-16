@@ -1,7 +1,16 @@
+import 'dart:convert';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_lyric/core/lyric_model.dart';
 import 'package:get/get.dart';
 import 'package:flutter_lyric/flutter_lyric.dart';
+import 'package:get/get_connect/http/src/utils/utils.dart';
+import 'package:listen1_xuan/bl.dart';
+import 'package:listen1_xuan/constants/network_defaults.dart';
+import 'package:listen1_xuan/controllers/controllers.dart';
+import 'package:listen1_xuan/models/SubtitleDetail.dart';
+import 'package:listen1_xuan/models/Subtitle.dart';
 import 'dart:io';
 import '../funcs.dart';
 import '../loweb.dart';
@@ -9,18 +18,25 @@ import '../controllers/play_controller.dart';
 import '../controllers/cache_controller.dart';
 import '../controllers/settings_controller.dart';
 import '../global_settings_animations.dart';
+import '../models/XLyricStyle.dart';
+import '../pages/lyric/bilibili_lyric_sheet.dart';
 import '../play.dart';
 import 'package:path/path.dart' as p;
+import 'dart:typed_data';
+import '../generated/dm.pb.dart';
+import 'mock.dart'; // 引入生成的类
 
 class XLyricController extends GetxController {
   // 歌词显示相关
   late LyricController lyricController;
   var isLyricLoading = false.obs;
   var hasLyric = false.obs;
+  Rx<XLyricStyle> lyricStyle = XLyricStyle().obs;
   RxDouble globalLyricDelay = RxDouble(0.0);
   RxDouble nowPlayingLyricDelay = RxDouble(0.0);
   bool updNowPlayingLyricDelay = false;
   Rx<LyricLine?> updFormatShowLyric = Rx<LyricLine?>(null);
+  Map<String, dynamic> trackIdToOid = {};
   // showTranslation 已移至 SettingsController
 
   // 歌词解析相关
@@ -41,11 +57,34 @@ class XLyricController extends GetxController {
     return '$trackId$suffix.lrc';
   }
 
+  String _getLyricCacheKey(String trackId, {bool isTranslation = false}) {
+    return isTranslation ? '${trackId}_tlyric' : '${trackId}_lyric';
+  }
+
   /// 从本地缓存读取歌词
   Future<Map<String, String>> _loadLyricFromCache(String trackId) async {
     final result = <String, String>{};
 
     try {
+      // 1) 优先从 lyricBox 读取“特殊歌词”（如弹幕生成）
+      final lyricKey = _getLyricCacheKey(trackId);
+      final tlyricKey = _getLyricCacheKey(trackId, isTranslation: true);
+
+      final boxLyric = _settingsController.getLyricBoxString(lyricKey);
+      if (boxLyric != null && boxLyric.isNotEmpty) {
+        result['lyric'] = boxLyric;
+      }
+      final boxTLyric = _settingsController.getLyricBoxString(tlyricKey);
+      if (boxTLyric != null && boxTLyric.isNotEmpty) {
+        result['tlyric'] = boxTLyric;
+      }
+
+      final needsFileLyric = !(result['lyric']?.isNotEmpty ?? false);
+      final needsFileTLyric = !(result['tlyric']?.isNotEmpty ?? false);
+      if (!needsFileLyric && !needsFileTLyric) {
+        return result;
+      }
+      // 2) lyricBox 没有时，再从本地文件缓存读取
       // 获取音乐文件的缓存路径作为基础路径
       final musicCachePath = await _cacheController.getLocalCache(trackId);
       if (musicCachePath.isEmpty) return result;
@@ -58,7 +97,7 @@ class XLyricController extends GetxController {
       final lyricFileName = _getLyricCacheFileName(trackId);
       final lyricFilePath = p.join(tempPath, lyricFileName);
 
-      if (await File(lyricFilePath).exists()) {
+      if (needsFileLyric && await File(lyricFilePath).exists()) {
         result['lyric'] = await File(lyricFilePath).readAsString();
       }
 
@@ -69,7 +108,7 @@ class XLyricController extends GetxController {
       );
       final tlyricFilePath = p.join(tempPath, tlyricFileName);
 
-      if (await File(tlyricFilePath).exists()) {
+      if (needsFileTLyric && await File(tlyricFilePath).exists()) {
         result['tlyric'] = await File(tlyricFilePath).readAsString();
       }
     } catch (e) {
@@ -84,8 +123,15 @@ class XLyricController extends GetxController {
     String trackId,
     String lyric, {
     bool isTranslation = false,
+    bool toLyricBox = false,
   }) async {
     try {
+      if (toLyricBox && _settingsController.useLyricBox) {
+        final key = _getLyricCacheKey(trackId, isTranslation: isTranslation);
+        await _settingsController.setLyricBoxString(key, lyric);
+        return;
+      }
+
       final tempDir = await xuanGetdataDirectory();
       final tempPath = tempDir.path;
 
@@ -99,7 +145,7 @@ class XLyricController extends GetxController {
 
       // 将歌词文件添加到缓存管理
       _cacheController.setLocalCache(
-        isTranslation ? '${trackId}_tlyric' : '${trackId}_lyric',
+        _getLyricCacheKey(trackId, isTranslation: isTranslation),
         fileName,
       );
     } catch (e) {
@@ -164,6 +210,12 @@ class XLyricController extends GetxController {
       );
       Get.find<PlayController>().songReplaceSettings.refresh();
     }, time: Duration(milliseconds: 100));
+    lyricStyle.value = XLyricStyle.fromJson(
+      jsonDecode(_settingsController.lyricStyle),
+    );
+    debounce(lyricStyle, (value) {
+      _settingsController.lyricStyle = jsonEncode(value.toJson());
+    }, time: Duration(milliseconds: 300));
   }
 
   /// 加载歌词
@@ -179,6 +231,9 @@ class XLyricController extends GetxController {
         ) ??
         0.0;
     try {
+      // _processLyricData(qrc, tlrc);
+      // isLyricLoading.value = false;
+      // return;
       // 首先尝试从本地缓存加载歌词
       final cachedLyrics = await _loadLyricFromCache(trackId);
 
@@ -220,11 +275,12 @@ class XLyricController extends GetxController {
 
       if (lyric.isNotEmpty) {
         // 保存歌词到缓存
-        await _saveLyricToCache(trackId, lyric);
-        if (tlyric.isNotEmpty) {
-          await _saveLyricToCache(trackId, tlyric, isTranslation: true);
+        if (!_settingsController.disableLyricDownload) {
+          await _saveLyricToCache(trackId, lyric);
+          if (tlyric.isNotEmpty) {
+            await _saveLyricToCache(trackId, tlyric, isTranslation: true);
+          }
         }
-
         // 处理歌词数据
         _processLyricData(lyric, tlyric);
       } else {
@@ -298,15 +354,380 @@ class XLyricController extends GetxController {
     _processLyricData();
   }
 
+  void toggledisableOpacity() {
+    _settingsController.disableOpacityInLyricPage =
+        !_settingsController.disableOpacityInLyricPage;
+  }
+
+  /// 查找哔哩哔哩歌词
+  Future<void> findBilibiliLyric() async {
+    try {
+      final playController = Get.find<PlayController>();
+      final trackId = playController.nowPlayingTrackId;
+      final duration = playController.music_player.state.duration;
+
+      if (trackId.isEmpty) {
+        showErrorSnackbar('获取弹幕失败', '当前没有正在播放的歌曲');
+        return;
+      }
+      if (duration <= Duration.zero) {
+        showErrorSnackbar('获取弹幕失败', '当前歌曲时长无效');
+        return;
+      }
+
+      final context = Get.context;
+      if (context == null) {
+        showErrorSnackbar('打开窗口失败', '当前页面上下文不可用');
+        return;
+      }
+
+      await showBilibiliLyricSheet(
+        context: context,
+        lyricController: this,
+        trackId: trackId,
+        duration: duration,
+      );
+    } catch (e) {
+      showErrorSnackbar('获取弹幕失败', e.toString());
+    }
+  }
+
+  Future<void> saveDanmuAsLyric({
+    required String trackId,
+    required List<DanmuElem> selectedDanmu,
+    required bool isTranslation,
+  }) async {
+    final lrcContent = buildLrcFromDanmu(selectedDanmu);
+    if (isEmpty(lrcContent)) {
+      throw '所选弹幕文本为空';
+    }
+    await _saveLyricToCache(
+      trackId,
+      lrcContent,
+      isTranslation: isTranslation,
+      toLyricBox: true,
+    );
+    await loadLyric();
+  }
+
+  Future<void> saveSubtitleAsLyric({
+    required String trackId,
+    required List<SubtitleDetail> subtitleDetails,
+    required bool isTranslation,
+  }) async {
+    final lrcContent = buildLrcFromSubtitleDetails(subtitleDetails);
+    if (isEmpty(lrcContent)) {
+      throw '所选字幕文本为空';
+    }
+    await _saveLyricToCache(
+      trackId,
+      lrcContent,
+      isTranslation: isTranslation,
+      toLyricBox: true,
+    );
+    await loadLyric();
+  }
+
+  String buildLrcFromDanmu(List<DanmuElem> danmuList) {
+    if (danmuList.isEmpty) return '';
+
+    final sorted = List<DanmuElem>.from(danmuList)
+      ..sort((a, b) => a.progress.compareTo(b.progress));
+
+    final buffer = StringBuffer();
+    for (final danmu in sorted) {
+      if (isEmpty(danmu.text)) {
+        continue;
+      }
+      final progress = danmu.progress < 0 ? 0 : danmu.progress;
+      final timestamp = formatLrcTimestamp(Duration(milliseconds: progress));
+      buffer.writeln('[$timestamp]${danmu.text.trim()}');
+    }
+
+    return buffer.toString().trim();
+  }
+
+  String buildLrcFromSubtitleDetails(List<SubtitleDetail> subtitleDetails) {
+    if (subtitleDetails.isEmpty) return '';
+
+    final sorted = List<SubtitleDetail>.from(subtitleDetails)
+      ..sort((a, b) => (a.from ?? 0).compareTo(b.from ?? 0));
+
+    final buffer = StringBuffer();
+    for (final detail in sorted) {
+      final content = detail.content?.trim() ?? '';
+      if (content.isEmpty) {
+        continue;
+      }
+      final fromSeconds = detail.from ?? 0;
+      final milliseconds = fromSeconds <= 0 ? 0 : (fromSeconds * 1000).round();
+      final timestamp = formatLrcTimestamp(
+        Duration(milliseconds: milliseconds),
+      );
+      buffer.writeln('[$timestamp]$content');
+    }
+
+    return buffer.toString().trim();
+  }
+
+  String formatLrcTimestamp(Duration duration) {
+    final totalMilliseconds = duration.inMilliseconds;
+    final minutes = (totalMilliseconds ~/ 60000).toString().padLeft(2, '0');
+    final seconds = ((totalMilliseconds % 60000) ~/ 1000).toString().padLeft(
+      2,
+      '0',
+    );
+    final centiseconds = ((totalMilliseconds % 1000) ~/ 10).toString().padLeft(
+      2,
+      '0',
+    );
+    return '$minutes:$seconds.$centiseconds';
+  }
+
+  Future<dynamic> _getCid(String trackId) async {
+    if (trackId.split('-').length > 1) {
+      return trackId.split('-')[1];
+    } else {
+      if (trackIdToOid.containsKey(trackId)) {
+        return trackIdToOid[trackId];
+      }
+      final aOrBvId = trackId.substring('bitrack_v_'.length);
+      if (aOrBvId.startsWith('BV')) {
+        //         curl -G 'https://api.bilibili.com/x/player/pagelist' \
+        // --data-urlencode 'bvid=BV1ex411J7GE'
+        final response = await dioWithCookieManager.get(
+          'https://api.bilibili.com/x/player/pagelist',
+          queryParameters: {'bvid': aOrBvId},
+        );
+        final ret = response.data['data'][0]['cid'];
+        trackIdToOid['trackId'] = ret;
+        return ret;
+      } else {
+        //         curl -G 'https://api.bilibili.com/x/player/pagelist' \
+        // --data-urlencode 'aid=13502509'
+        final response = await dioWithCookieManager.get(
+          'https://api.bilibili.com/x/player/pagelist',
+          queryParameters: {'aid': aOrBvId},
+        );
+        final ret = response.data['data'][0]['cid'];
+        trackIdToOid['trackId'] = ret;
+        return ret;
+      }
+    }
+  }
+
+  Future<List<DanmuElem>> findBilibiliLyricDanmu(
+    String trackId,
+    Duration duration,
+  ) async {
+    // Duration dur = Get.find<PlayController>().music_player.state.duration;
+
+    int segmentTotal = (duration.inMilliseconds / (6 * 60 * 1000)).ceil();
+    segmentTotal = segmentTotal > 0 ? segmentTotal : 1;
+    // String id = Get.find<PlayController>().nowPlayingTrackId;
+    if (!trackId.startsWith('bi')) {
+      throw '当前歌曲不是哔哩哔哩歌曲，无法获取弹幕';
+    }
+    Map<String, dynamic> param = {
+      "type": 1,
+      // "oid": 31825857879,
+      // "segment_index": 1,
+      "pull_mode": 1,
+    };
+    param['oid'] = await _getCid(trackId);
+    int segmentIndex = 1;
+    List<DanmuElem> allDanmuElems = [];
+    do {
+      param['segment_index'] = segmentIndex;
+      final response = await Bilibili.wrap_wbi_request(
+        'https://api.bilibili.com/x/v2/dm/wbi/web/seg.so',
+        segmentIndex != 1 ? param : {...param, 'ps': 0, 'pe': 120000},
+        responseType: ResponseType.bytes,
+      );
+      if (response.statusCode == 200) {
+        final bytes = response.data as Uint8List;
+        DmSegMobileReply dmSegMobileReply = DmSegMobileReply.fromBuffer(bytes);
+        allDanmuElems.addAll(dmSegMobileReply.elems);
+      } else {
+        throw '请求弹幕第$segmentIndex段失败，状态码: ${response.statusCode}';
+      }
+      if (segmentIndex == 1) {
+        final response = await Bilibili.wrap_wbi_request(
+          'https://api.bilibili.com/x/v2/dm/wbi/web/seg.so',
+          {...param, 'ps': 120000, 'pe': 360000},
+          responseType: ResponseType.bytes,
+        );
+        if (response.statusCode == 200) {
+          final bytes = response.data as Uint8List;
+          DmSegMobileReply dmSegMobileReply = DmSegMobileReply.fromBuffer(
+            bytes,
+          );
+          allDanmuElems.addAll(dmSegMobileReply.elems);
+        } else {
+          throw '请求弹幕第$segmentIndex段失败，状态码: ${response.statusCode}';
+        }
+      }
+    } while (++segmentIndex <= segmentTotal);
+
+    // debugPrint('总弹幕数量: ${allDanmuElems.length}');
+    return allDanmuElems;
+  }
+
+  Future<List<Subtitle>> fetchBilibiliSubtitles(String trackId) async {
+    if (!trackId.startsWith('bi')) {
+      throw '当前歌曲不是哔哩哔哩歌曲，无法获取字幕';
+    }
+    String? cid;
+    if (trackId.split('-').length > 1) {
+      cid = trackId.split('-')[1];
+    }
+    // https://api.bilibili.com/x/player/wbi/v2?aid=116447602875105&cid=37719312328&isGaiaAvoided=false&web_location=1315873&dm_img_list=%5B%7B%22x%22:2985,%22y%22:1795,%22z%22:0,%22timestamp%22:2203,%22k%22:65,%22type%22:0%7D,%7B%22x%22:3169,%22y%22:1520,%22z%22:43,%22timestamp%22:2700,%22k%22:116,%22type%22:0%7D,%7B%22x%22:3358,%22y%22:1332,%22z%22:121,%22timestamp%22:2854,%22k%22:119,%22type%22:0%7D,%7B%22x%22:3950,%22y%22:871,%22z%22:77,%22timestamp%22:3561,%22k%22:87,%22type%22:0%7D,%7B%22x%22:3932,%22y%22:788,%22z%22:47,%22timestamp%22:3686,%22k%22:74,%22type%22:0%7D,%7B%22x%22:5019,%22y%22:718,%22z%22:396,%22timestamp%22:4690,%22k%22:69,%22type%22:0%7D%5D&dm_img_str=V2ViR0wgMS4wIChPcGVuR0wgRVMgMi4wIENocm9taXVtKQ&dm_cover_img_str=QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgUlRYIDMwNjAgTGFwdG9wIEdQVSAoMHgwMDAwMjUyMCkgRGlyZWN0M0QxMSB2c181XzAgcHNfNV8wLCBEM0QxMSlHb29nbGUgSW5jLiAoTlZJRElBKQ&dm_img_inter=%7B%22ds%22:%5B%7B%22t%22:2,%22c%22:%22YnB4LXBsYXllci1sb2FkaW5nLXBhbmVsIGJweC1zdGF0ZS1sb2FkaW%22,%22p%22:%5B698,60,661%5D,%22s%22:%5B160,4822,2296%5D%7D%5D,%22wh%22:%5B5685,6175,85%5D,%22of%22:%5B499,998,499%5D%7D&w_rid=f859d87abf1cd11f1f59c601386a24eb&wts=1777037254
+    final response = await Bilibili.wrap_wbi_request(
+      'https://api.bilibili.com/x/player/wbi/v2',
+      {
+        'bvid': trackId.split('_').last.split('-').first,
+        'cid': await _getCid(trackId),
+      },
+    );
+    if (response.statusCode == 200) {
+      final data = response.data;
+      if (data['code'] == 0 && data['data'] != null) {
+        // /data/subtitle/subtitles/0/subtitle_url
+        final subtitlesData = data['data']['subtitle']['subtitles'] as List;
+        List<Subtitle> subtitles = List.from(
+          subtitlesData.map((item) => Subtitle.fromJson(item)),
+        );
+        return subtitles;
+      } else {
+        throw '请求字幕失败: ${data['message'] ?? '未知错误'}';
+      }
+    } else {
+      throw '请求字幕失败，状态码: ${response.statusCode}';
+    }
+  }
+
+  Future<List<SubtitleDetail>> fetchBilibiliSubtitleDetail(
+    Subtitle subtitle,
+  ) async {
+    if (isEmpty(subtitle.subtitleUrl)) {
+      throw '字幕URL不可用';
+    }
+    final response = await dioWithCookieManager.get(
+      'https:${subtitle.subtitleUrl!}',
+      options: Options(headers: kBilibiliHeaders),
+    );
+    if (response.statusCode == 200) {
+      final data = response.data;
+      if (data['body'] != null) {
+        final subtitleDetailsData = data['body'] as List;
+        List<SubtitleDetail> subtitleDetails = List.from(
+          subtitleDetailsData.map((item) => SubtitleDetail.fromJson(item)),
+        );
+        return subtitleDetails;
+      } else {
+        throw '请求字幕详情失败: ${data['message'] ?? '未知错误'}';
+      }
+    } else {
+      throw '请求字幕详情失败，状态码: ${response.statusCode}';
+    }
+  }
+
+  Future<void> fetchDanmu() async {
+    final url =
+        "https://api.bilibili.com/x/v2/dm/wbi/web/seg.so?type=1&oid=31825857879&pid=115060697470544&segment_index=1&pull_mode=1&ps=120000&pe=360000&web_location=1315873&w_rid=deb11704e0c4b28cff30ef0c2dedf050&wts=1772077522";
+
+    // try {
+    final response = await dioWithCookieManager.get(
+      url,
+      options: Options(
+        responseType: ResponseType.bytes,
+        headers: {
+          "Accept-Encoding": "identity", // 明确要求不进行任何
+        },
+      ),
+    );
+    debugPrint(
+      '前20${(response.data as Uint8List).take(20).toList().toString()}',
+    );
+    debugPrint(' ${String.fromCharCodes(response.data)}');
+    DmSegMobileReply dmSegMobileReply = DmSegMobileReply.fromBuffer(
+      (response.data as Uint8List),
+    );
+    if (response.statusCode == 200) {
+      final bytes = response.data as Uint8List;
+    } else {
+      print('请求失败，状态码: ${response.statusCode}');
+    }
+    // } catch (e) {
+    //   print("解析错误: $e");
+    // }
+  }
+
+  String? _extractTrackIdFromLyricBoxKey(Object key) {
+    if (key is! String) return null;
+
+    const tSuffix = '_tlyric';
+    const suffix = '_lyric';
+
+    if (key.endsWith(tSuffix)) {
+      return key.substring(0, key.length - tSuffix.length);
+    }
+    if (key.endsWith(suffix)) {
+      return key.substring(0, key.length - suffix.length);
+    }
+    return null;
+  }
+
+  /// 删除 lyricBox 中除 keepIds 之外的所有歌词记录（仅处理 *_lyric / *_tlyric）
+  Future<void> clearLyricBoxExceptIds(Iterable<String> keepIds) async {
+    try {
+      if (!_settingsController.useLyricBox) return;
+      final box = _settingsController.lyricBox;
+      if (box == null) return;
+
+      final keepSet = keepIds.toSet();
+      final keysToDelete = <dynamic>[];
+
+      for (final key in box.keys) {
+        final trackId = _extractTrackIdFromLyricBoxKey(key);
+        if (trackId == null) continue;
+        if (!keepSet.contains(trackId)) {
+          keysToDelete.add(key);
+        }
+      }
+
+      if (keysToDelete.isEmpty) return;
+      await box.deleteAll(keysToDelete);
+    } catch (e) {
+      debugPrint('清理 lyricBox 失败: $e');
+    }
+  }
+
   /// 清理特定歌曲的歌词缓存
   Future<void> clearLyricCache(String trackId) async {
     try {
-      // 清理主歌词缓存
-      final lyricCacheKey = '${trackId}_lyric';
-      final tlyricCacheKey = '${trackId}_tlyric';
+      // 直接删除歌词文件与 lyricBox 字段（不走 CacheController，它面向音频缓存）
+      final tempDir = await xuanGetdataDirectory();
+      final tempPath = tempDir.path;
 
-      await _cacheController.cleanLocalCache(false, lyricCacheKey);
-      await _cacheController.cleanLocalCache(false, tlyricCacheKey);
+      Future<void> deleteFileIfExists(String fileName) async {
+        final filePath = p.join(tempPath, fileName);
+        final file = File(filePath);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }
+
+      await deleteFileIfExists(_getLyricCacheFileName(trackId));
+      await deleteFileIfExists(
+        _getLyricCacheFileName(trackId, isTranslation: true),
+      );
+
+      if (_settingsController.useLyricBox) {
+        final box = _settingsController.lyricBox;
+        await box?.delete(_getLyricCacheKey(trackId));
+        await box?.delete(_getLyricCacheKey(trackId, isTranslation: true));
+      }
     } catch (e) {
       print('清理歌词缓存失败: $e');
     }

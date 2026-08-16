@@ -53,7 +53,7 @@ class PlaylistController extends GetxController {
       );
 
       result['success']((data) {
-        print(data); // 打印实际的数据
+        logger.t('加载歌单数据成功: $data');
         try {
           playlists.value = data.toList();
           perPage.value = data.length;
@@ -61,11 +61,12 @@ class PlaylistController extends GetxController {
           loading.value = false;
         } catch (e) {
           showErrorSnackbar('加载歌单数据失败', e.toString());
+          logger.e('加载歌单数据失败', error: e);
           loading.value = false;
         }
       });
     } catch (e) {
-      print(e);
+      logger.e('加载歌单数据失败', error: e);
       loading.value = false;
     }
   }
@@ -84,7 +85,7 @@ class PlaylistController extends GetxController {
       );
 
       result['success']((data) {
-        print(data); // 打印实际的数据
+        logger.t('加载更多歌单数据成功: $data');
         if (data.length == 0) {
           hasMore.value = false;
         } else {
@@ -93,7 +94,7 @@ class PlaylistController extends GetxController {
         loadingMore.value = false;
       });
     } catch (e) {
-      print(e);
+      logger.e('加载更多歌单数据失败', error: e);
       loadingMore.value = false;
     }
   }
@@ -105,16 +106,12 @@ class PlaylistController extends GetxController {
       hasMore.value = true;
       await loadData();
     } catch (e) {
-      print(e);
+      logger.e('刷新歌单数据失败', error: e);
     }
   }
 
   void onPlaylistTapped(Map<String, dynamic> playlist) {
-    Get.toNamed(
-      playlist['id'],
-      arguments: {'listId': playlist['id'], 'is_my': false},
-      id: 1,
-    );
+    Ro.toArg(PlaylistInfoArgs(playListInfo: PlayListInfo.fromJson(playlist)));
   }
 
   // Helper method to get controller tag
@@ -180,7 +177,7 @@ class Playlist extends GetView<PlaylistController> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(Icons.music_note_outlined, size: 64, color: Colors.grey),
-              SizedBox(height: 16),
+              16.sbh,
               ElevatedButton.icon(
                 onPressed: () => controller.refreshData(),
                 icon: Icon(Icons.refresh),
@@ -271,48 +268,41 @@ class Playlist extends GetView<PlaylistController> {
   ) {
     return GestureDetector(
       onTap: () => controller.onPlaylistTapped(playlist),
-      child: Container(
-        width: itemWidth,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: itemWidth,
-              height: itemWidth, // Square aspect ratio
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8.0),
-                child: ExtendedImage.network(
-                  playlist['cover_img_url'],
-                  fit: BoxFit.cover,
-                  cache: true,
-                  loadStateChanged: (ExtendedImageState state) {
-                    if (state.extendedImageLoadState == LoadState.failed) {
-                      return Center(
-                        child: Icon(
-                          Icons.broken_image,
-                          color: Colors.grey,
-                          size: 40,
-                        ),
-                      );
-                    }
-                    return null; // Use default rendering
-                  },
-                ),
-              ),
-            ),
-            SizedBox(height: 8.0),
-            Container(
-              width: itemWidth,
-              child: Text(
-                playlist['title'],
-                style: TextStyle(fontSize: 12),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ExtendedImage.network(
+                playlist['cover_img_url'],
+                fit: BoxFit.cover,
+                cache: true,
+                loadStateChanged: (ExtendedImageState state) {
+                  if (state.extendedImageLoadState == LoadState.failed) {
+                    return Center(
+                      child: Icon(
+                        Icons.broken_image,
+                        color: Colors.grey,
+                        size: 40,
+                      ),
+                    );
+                  }
+                  if (state.extendedImageLoadState == LoadState.loading) {
+                    return globalLoadingAnimeOfExtendedImage;
+                  }
+                  return null; // Use default rendering
+                },
+              )
+              .clipSmoothRectSize(itemWidth)
+              .sbs(itemWidth)
+              .hero4playlistItemImg(PlayListInfo.fromJson(playlist)),
+          8.sbh,
+          Text(
+            playlist['title'],
+            style: TextStyle(fontSize: 12),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ).sbw(itemWidth),
+        ],
+      ).sbw(itemWidth),
     );
   }
 }

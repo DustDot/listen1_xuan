@@ -5,29 +5,25 @@ Widget buildCoverImage(double size, {double? borderRadius}) {
   final radius = borderRadius ?? 8.0;
   return GestureDetector(
     onTap: () => _openLyricPage(),
-    child: Container(
-      width: size,
-      height: size,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
-        child: Obx(() {
-          Track? mediaItem = _playController.nowPlayingTrackRx.value;
-          return isEmpty(mediaItem?.img_url)
-              ? Container(color: Get.theme.cardColor)
-              : ExtendedImage.network(
-                  mediaItem!.img_url!,
-                  fit: BoxFit.cover,
-                  cache: true,
-                  loadStateChanged: (state) {
-                    if (state.extendedImageLoadState == LoadState.failed) {
-                      return Icon(Icons.music_note, size: size);
-                    }
-                    return null;
-                  },
-                );
-        }),
-      ),
-    ),
+    child: Obx(() {
+      Track? mediaItem = _playController.nowPlayingTrackRx.value;
+      return isEmpty(mediaItem?.img_url)
+          ? Container(color: Get.theme.cardColor)
+          : ExtendedImage.network(
+              mediaItem!.img_url!,
+              fit: BoxFit.cover,
+              cache: true,
+              loadStateChanged: (state) {
+                if (state.extendedImageLoadState == LoadState.failed) {
+                  return Icon(Icons.music_note, size: size);
+                }
+                if (state.extendedImageLoadState == LoadState.loading) {
+                  return globalLoadingAnimeOfExtendedImage;
+                }
+                return null;
+              },
+            );
+    }).clipSmoothRectSize(size).sbs(size),
   );
 }
 
@@ -52,19 +48,10 @@ Widget withDragDetector({required Widget child, required bool isCollapsed}) {
 
 Future<void> _onTap(BuildContext context) async {
   if (!globalHorizon) {
-    main_showVolumeSlider();
+    showVolumeSlider();
   }
   final track = await getnowplayingsong();
   var ret = await song_dialog(context, track['track'], position: position);
-  if (ret != null) {
-    if (ret["push"] != null) {
-      Get.toNamed(
-        ret["push"],
-        arguments: {'listId': ret["push"], 'is_my': false},
-        id: 1,
-      );
-    }
-  }
 }
 
 Future<void> _onDoubleTap() async {
@@ -101,59 +88,64 @@ Widget buildSongInfo({
   return Builder(
     builder: (context) => Obx(() {
       Track? mediaItem = _playController.nowPlayingTrackRx.value;
-      return Container(
-        color: Colors.transparent,
-        padding: EdgeInsets.only(bottom: 20.w),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isCollapsed)
-              Text(
-                mediaItem?.title ?? '未播放',
-                style: TextStyle(
-                  fontSize: titleSize,
-                  fontWeight: FontWeight.bold,
+      return AnimatedSwitcher(
+        duration: Duration(milliseconds: 200),
+        transitionBuilder: horTitleTextTra,
+        child: Container(
+          key: ValueKey(mediaItem?.id ?? 'no-song'),
+          color: Colors.transparent,
+          padding: EdgeInsets.only(bottom: 20.w),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isCollapsed)
+                Text(
+                  mediaItem?.title ?? '未播放',
+                  style: TextStyle(
+                    fontSize: titleSize,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                )
+              else
+                SelectableText(
+                  mediaItem?.title ?? '未播放',
+                  style: TextStyle(
+                    fontSize: titleSize,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  onTap: () => _onTap(context),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
                 ),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              )
-            else
-              SelectableText(
-                mediaItem?.title ?? '未播放',
-                style: TextStyle(
-                  fontSize: titleSize,
-                  fontWeight: FontWeight.bold,
+              4.sbh,
+              if (isCollapsed)
+                Text(
+                  mediaItem?.artist ?? '',
+                  style: TextStyle(
+                    fontSize: artistSize,
+                    color: Get.theme.textTheme.bodySmall?.color,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                )
+              else
+                SelectableText(
+                  mediaItem?.artist ?? '',
+                  style: TextStyle(
+                    fontSize: artistSize,
+                    color: Get.theme.textTheme.bodySmall?.color,
+                  ),
+                  onTap: () => _onTap(context),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
                 ),
-                onTap: () => _onTap(context),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-              ),
-            SizedBox(height: 4),
-            if (isCollapsed)
-              Text(
-                mediaItem?.artist ?? '',
-                style: TextStyle(
-                  fontSize: artistSize,
-                  color: Get.theme.textTheme.bodySmall?.color,
-                ),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              )
-            else
-              SelectableText(
-                mediaItem?.artist ?? '',
-                style: TextStyle(
-                  fontSize: artistSize,
-                  color: Get.theme.textTheme.bodySmall?.color,
-                ),
-                onTap: () => _onTap(context),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-              ),
-          ],
+            ],
+          ),
         ),
       );
     }),
@@ -179,7 +171,7 @@ Widget get showVolumeSliderBtn {
   return IconButton(
     style: controlBtnsStyle,
     icon: Icon(Icons.volume_up, size: 64.w),
-    onPressed: main_showVolumeSlider,
+    onPressed: showVolumeSlider,
   );
 }
 
@@ -205,6 +197,7 @@ Widget buildPreviousButton() {
   );
 }
 
+GlobalKey _playButtonKey = GlobalKey();
 // 播放/暂停按钮
 Widget buildPlayPauseButton(double expandProgress) {
   return Stack(
@@ -213,47 +206,43 @@ Widget buildPlayPauseButton(double expandProgress) {
         child: AnimatedOpacity(
           opacity: expandProgress < 0.5 ? 1.0 : 0.0,
           duration: Duration(milliseconds: 200),
-          child: Obx(
-            () => _playController.loading
-                ? CircularProgressIndicator(strokeWidth: 4.w)
-                : StreamBuilder<MediaState>(
-                    stream: _mediaStateStream,
-                    builder: (context, snapshot) {
-                      final mediaState = snapshot.data;
-                      final duration =
-                          mediaState?.duration.inMilliseconds.toDouble() ?? 0.0;
-                      if (duration <= 0) {
-                        return CircularProgressIndicator(strokeWidth: 4.w);
-                      }
-                      final position =
-                          mediaState?.position.inMilliseconds.toDouble() ?? 0.0;
-                      final progress = (position / duration).clamp(0.0, 1.0);
+          child: StreamBuilder<MediaState>(
+            stream: _mediaStateStream,
+            builder: (context, snapshot) {
+              final mediaState = snapshot.data;
+              final duration =
+                  mediaState?.duration.inMilliseconds.toDouble() ?? 0.0;
+              double? progress;
+              if (!(duration <= 0)) {
+                final position =
+                    mediaState?.position.inMilliseconds.toDouble() ?? 0.0;
+                progress = (position / duration).clamp(0.0, 1.0);
+              }
 
-                      // 使用 AnimatedBuilder 监听旋转动画控制器
-                      return AnimatedBuilder(
-                        animation:
-                            _playController.playVPlayBtnProcessController,
-                        builder: (context, child) {
-                          // 应用选中的曲线
-                          final curvedValue = _playController
-                              .playButtonRotationCurveValue
-                              .transform(
-                                _playController
-                                    .playVPlayBtnProcessController
-                                    .value,
-                              );
-
-                          return Transform.rotate(
-                            angle: curvedValue * 2 * pi,
-                            child: CircularProgressIndicator(
-                              value: progress,
-                              strokeWidth: 4.w,
-                            ),
-                          );
-                        },
+              // 使用 AnimatedBuilder 监听旋转动画控制器
+              return AnimatedBuilder(
+                animation: _playController.playVPlayBtnProcessController,
+                builder: (context, child) {
+                  // 应用选中的曲线
+                  final curvedValue = _playController
+                      .playButtonRotationCurveValue
+                      .transform(
+                        _playController.playVPlayBtnProcessController.value,
                       );
-                    },
-                  ),
+
+                  return Transform.rotate(
+                    angle: curvedValue * 2 * pi,
+                    child: Obx(
+                      () => MotorCircularProgressIndicator(
+                        key: _playButtonKey,
+                        strokeWidth: 4.w,
+                        value: _playController.loading ? null : progress,
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
           ),
         ),
       ),
@@ -318,15 +307,6 @@ Widget get songDialogBtn {
         track['track'],
         position: position,
       );
-      if (ret != null) {
-        if (ret["push"] != null) {
-          Get.toNamed(
-            ret["push"],
-            arguments: {'listId': ret["push"], 'is_my': false},
-            id: 1,
-          );
-        }
-      }
     },
   );
 }
@@ -359,29 +339,50 @@ Widget get positionSlider => StreamBuilder<MediaState>(
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SizedBox(
-            width: 120.w,
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Obx(
-                  () => Text(
-                    _playController.loading
-                        ? _playController
+          Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Obx(
+                () => AnimatedSwitcher(
+                  duration: Duration(milliseconds: 200),
+                  transitionBuilder: horTitleTextTra,
+                  child: _playController.loading
+                      ? Text(
+                          key: ValueKey('slider-loading-position'),
+                          _playController
                                   .bootStraping[_playController
                                       .nowPlayingTrackRx
                                       .value
                                       ?.id]
                                   ?.split('/')
                                   .first ??
-                              ''
-                        : formatDuration(mediaState?.position ?? Duration.zero),
-                    style: TextStyle(fontSize: 48.0.w),
-                  ),
+                              '',
+                          style: TextStyle(fontSize: 48.0.w),
+                        )
+                      : KeyedSubtree(
+                          key: ValueKey('slider-playing-position'),
+                          child: _buildDurationBySplitStreams(
+                            hourStream: _mediaPositionHourStream,
+                            minuteStream: _mediaPositionMinuteStream,
+                            secondStream: _mediaPositionSecondStream,
+                            initialHour:
+                                (mediaState?.position ?? Duration.zero).inHours,
+                            initialMinute:
+                                (mediaState?.position ?? Duration.zero)
+                                    .inMinutes
+                                    .remainder(60),
+                            initialSecond:
+                                (mediaState?.position ?? Duration.zero)
+                                    .inSeconds
+                                    .remainder(60),
+                            textStyle: TextStyle(fontSize: 48.0.w),
+                            keyPrefix: 'slider-pos',
+                          ),
+                        ),
                 ),
               ),
             ),
-          ),
+          ).wsbw(120),
           Expanded(
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: 20.w),
@@ -433,29 +434,50 @@ Widget get positionSlider => StreamBuilder<MediaState>(
               ),
             ),
           ),
-          SizedBox(
-            width: 120.w,
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Obx(
-                  () => Text(
-                    _playController.loading
-                        ? _playController
+          Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Obx(
+                () => AnimatedSwitcher(
+                  duration: Duration(milliseconds: 200),
+                  transitionBuilder: horTitleTextTra,
+                  child: _playController.loading
+                      ? Text(
+                          key: ValueKey('slider-loading-duration'),
+                          _playController
                                   .bootStraping[_playController
                                       .nowPlayingTrackRx
                                       .value
                                       ?.id]
                                   ?.split('/')
                                   .last ??
-                              ''
-                        : formatDuration(mediaState?.duration ?? Duration.zero),
-                    style: TextStyle(fontSize: 48.0.w),
-                  ),
+                              '',
+                          style: TextStyle(fontSize: 48.0.w),
+                        )
+                      : KeyedSubtree(
+                          key: ValueKey('slider-playing-duration'),
+                          child: _buildDurationBySplitStreams(
+                            hourStream: _mediaDurationHourStream,
+                            minuteStream: _mediaDurationMinuteStream,
+                            secondStream: _mediaDurationSecondStream,
+                            initialHour:
+                                (mediaState?.duration ?? Duration.zero).inHours,
+                            initialMinute:
+                                (mediaState?.duration ?? Duration.zero)
+                                    .inMinutes
+                                    .remainder(60),
+                            initialSecond:
+                                (mediaState?.duration ?? Duration.zero)
+                                    .inSeconds
+                                    .remainder(60),
+                            textStyle: TextStyle(fontSize: 48.0.w),
+                            keyPrefix: 'slider-dur',
+                          ),
+                        ),
                 ),
               ),
             ),
-          ),
+          ).wsbw(120),
         ],
       ),
     );
@@ -494,22 +516,18 @@ class SizedBoxWithOverflow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      height: height,
-      child: OverflowBox(
-        fit: OverflowBoxFit.deferToChild,
-        maxWidth: maxWidth,
-        maxHeight: maxHeight,
-        child: Opacity(
-          opacity: min(
-            (width ?? maxWidth) / maxWidth,
-            (height ?? maxHeight) / maxHeight,
-          ).clamp(0, 1.0),
-          child: child,
-        ),
+    return OverflowBox(
+      fit: OverflowBoxFit.deferToChild,
+      maxWidth: maxWidth,
+      maxHeight: maxHeight,
+      child: Opacity(
+        opacity: min(
+          (width ?? maxWidth) / maxWidth,
+          (height ?? maxHeight) / maxHeight,
+        ).clamp(0, 1.0),
+        child: child,
       ),
-    );
+    ).sbwh(width, height);
   }
 }
 
@@ -590,5 +608,222 @@ class _PlayPauseBtnState extends State<PlayPauseBtn>
         }
       },
     );
+  }
+}
+
+Widget Function(Widget, Animation<double>) get horTitleTextTra =>
+    (Widget child, Animation<double> animation) {
+      return FadeTransition(
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeInCirc),
+
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.9, end: 1.0).animate(
+            CurvedAnimation(parent: animation, curve: Curves.easeInOut),
+          ),
+          child: child,
+        ),
+      );
+    };
+
+Widget formatMediaStateByParts({TextStyle? textStyle}) {
+  final style = textStyle ?? TextStyle(fontSize: 20.0);
+  final state = _playController.mediaState.value;
+
+  return Obx(() {
+    bool disSomeEffect = Get.find<ThemeController>().disSomeEffect;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildDurationBySplitStreams(
+          hourStream: _mediaPositionHourStream,
+          minuteStream: _mediaPositionMinuteStream,
+          secondStream: _mediaPositionSecondStream,
+          initialHour: state.position.inHours,
+          initialMinute: state.position.inMinutes.remainder(60),
+          initialSecond: state.position.inSeconds.remainder(60),
+          textStyle: style,
+          keyPrefix: 'pos',
+          disSomeEffect: disSomeEffect,
+        ),
+        Text('/', style: style),
+        _buildDurationBySplitStreams(
+          hourStream: _mediaDurationHourStream,
+          minuteStream: _mediaDurationMinuteStream,
+          secondStream: _mediaDurationSecondStream,
+          initialHour: state.duration.inHours,
+          initialMinute: state.duration.inMinutes.remainder(60),
+          initialSecond: state.duration.inSeconds.remainder(60),
+          textStyle: style,
+          keyPrefix: 'dur',
+          disSomeEffect: disSomeEffect,
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeInOut,
+          child: StreamBuilder<bool>(
+            stream: _mediaBufferingStream,
+            initialData: state.buffering,
+            builder: (context, snapshot) {
+              final buffering = snapshot.data ?? false;
+              if (!buffering) return const SizedBox.shrink();
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('(', style: style),
+                  _buildDurationBySplitStreams(
+                    hourStream: _mediaBufferHourStream,
+                    minuteStream: _mediaBufferMinuteStream,
+                    secondStream: _mediaBufferSecondStream,
+                    initialHour: state.buffer.inHours,
+                    initialMinute: state.buffer.inMinutes.remainder(60),
+                    initialSecond: state.buffer.inSeconds.remainder(60),
+                    textStyle: style,
+                    keyPrefix: 'buf',
+                    disSomeEffect: disSomeEffect,
+                  ),
+                  Text(')', style: style),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  });
+}
+
+Widget _buildDurationBySplitStreams({
+  required Stream<int> hourStream,
+  required Stream<int> minuteStream,
+  required Stream<int> secondStream,
+  required int initialHour,
+  required int initialMinute,
+  required int initialSecond,
+  required TextStyle textStyle,
+  required String keyPrefix,
+  bool disSomeEffect = false,
+}) {
+  return Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      AnimatedSize(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeInOut,
+        child: StreamBuilder<int>(
+          stream: hourStream,
+          initialData: initialHour,
+          builder: (context, snapshot) {
+            final hour = snapshot.data ?? 0;
+            if (hour <= 0) return const SizedBox.shrink();
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (disSomeEffect)
+                  Text('${hour.toString().padLeft(2, '0')}:', style: textStyle)
+                else ...[
+                  StableAnimatedDigit(
+                    key: ValueKey('$keyPrefix-hour'),
+                    value: hour,
+                    firstScrollAnimate: false,
+                    fractionDigits: 0,
+                    textStyle: textStyle,
+                  ),
+                  Text(':', style: textStyle),
+                ],
+              ],
+            );
+          },
+        ),
+      ),
+      StreamBuilder<int>(
+        stream: minuteStream,
+        initialData: initialMinute,
+        builder: (context, snapshot) {
+          return disSomeEffect
+              ? Text('${snapshot.data ?? 0}'.padLeft(2, '0'), style: textStyle)
+              : StableAnimatedDigit(
+                  key: ValueKey('$keyPrefix-min'),
+                  value: snapshot.data ?? 0,
+                  enableMinIntegerDigits: true,
+                  firstScrollAnimate: false,
+                  fractionDigits: 0,
+                  textStyle: textStyle,
+                );
+        },
+      ),
+      Text(':', style: textStyle),
+      StreamBuilder<int>(
+        stream: secondStream,
+        initialData: initialSecond,
+        builder: (context, snapshot) {
+          return disSomeEffect
+              ? Text('${snapshot.data ?? 0}'.padLeft(2, '0'), style: textStyle)
+              : StableAnimatedDigit(
+                  key: ValueKey('$keyPrefix-sec'),
+                  value: snapshot.data ?? 0,
+                  enableMinIntegerDigits: true,
+                  firstScrollAnimate: false,
+                  textStyle: textStyle,
+                  fractionDigits: 0,
+                );
+        },
+      ),
+    ],
+  );
+}
+
+class StableAnimatedDigit extends StatefulWidget {
+  final int value;
+  final bool enableMinIntegerDigits;
+  final bool firstScrollAnimate;
+  final int fractionDigits;
+  final TextStyle? textStyle;
+
+  const StableAnimatedDigit({
+    super.key,
+    required this.value,
+    this.enableMinIntegerDigits = false,
+    this.firstScrollAnimate = false,
+    this.fractionDigits = 0,
+    this.textStyle,
+  });
+
+  @override
+  State<StableAnimatedDigit> createState() => _StableAnimatedDigitState();
+}
+
+class _StableAnimatedDigitState extends State<StableAnimatedDigit> {
+  late int _cachedValue;
+  late Widget _cachedWidget;
+
+  @override
+  void initState() {
+    super.initState();
+    _cachedValue = widget.value;
+    _cachedWidget = _buildDigit(_cachedValue);
+  }
+
+  @override
+  void didUpdateWidget(covariant StableAnimatedDigit oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != _cachedValue) {
+      _cachedValue = widget.value;
+      _cachedWidget = _buildDigit(_cachedValue);
+    }
+  }
+
+  Widget _buildDigit(int value) {
+    return AnimatedDigitWidget(
+      value: value,
+      enableMinIntegerDigits: widget.enableMinIntegerDigits,
+      firstScrollAnimate: widget.firstScrollAnimate,
+      fractionDigits: widget.fractionDigits,
+      textStyle: widget.textStyle,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _cachedWidget;
   }
 }

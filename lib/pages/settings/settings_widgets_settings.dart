@@ -1,6 +1,5 @@
 part of '../../settings.dart';
 
-
 Widget settingsWidget(BuildContext context) {
   return Padding(
     padding: EdgeInsets.all(10),
@@ -9,40 +8,42 @@ Widget settingsWidget(BuildContext context) {
         Row(
           children: [
             Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => outputAllSettingsToFile(false),
+              child: ElevatedButtonIcon(
+                onPressed: () async => outputAllSettingsToFile(false),
                 icon: Icon(Icons.save),
                 label: Text('保存配置到文件'),
               ),
             ),
-            SizedBox(width: 10),
+            10.sbw,
             Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => importSettingsFromFile(),
+              child: ElevatedButtonIcon(
+                onPressed: importSettingsFromFile,
                 icon: Icon(Icons.upload),
                 label: Text('导入配置文件'),
               ),
             ),
           ],
         ),
-        SizedBox(height: 10),
+        10.sbh,
         Row(
           children: [
             Expanded(
-              child: ElevatedButton.icon(
+              child: ElevatedButtonIcon(
                 onPressed: outputPlaylistToGithubGist,
                 icon: Icon(Icons.playlist_play),
                 label: Text('导出歌单到Github Gist'),
               ),
             ),
-            SizedBox(width: 10),
+            10.sbw,
             Expanded(
-              child: ElevatedButton.icon(
+              child: ElevatedButtonIcon(
                 onPressed: () async {
                   if (Github.status != 2) {
-                    // _msg('请先登录Github', 1.0);
-                    showWarningSnackbar('请先登录Github Gist', null);
-                    return;
+                    await Github.updateStatus();
+                    if (Github.status != 2) {
+                      showInfoSnackbar('请先登录Github', '');
+                      return;
+                    }
                   }
                   var playlists = await Github.listExistBackup();
                   print(playlists);
@@ -118,7 +119,7 @@ Widget settingsWidget(BuildContext context) {
             ),
           ],
         ),
-        SizedBox(height: 10),
+        10.sbh,
         ElevatedButton.icon(
           onPressed: Get.find<SupabaseAuthController>().isLoggedIn.value
               ? () {
@@ -186,65 +187,60 @@ void _showSponsorDialog(BuildContext context) {
 
   Get.dialog(
     AlertDialog(
-      title: Row(
-        children: [Icon(Icons.lock_open), SizedBox(width: 8), Text('解锁受限功能')],
-      ),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              MarkdownBody(data: markdownContent),
-              // 用户 ID 展示框
-              Container(
-                padding: EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Get.theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: Get.theme.colorScheme.outline.withOpacity(0.3),
-                  ),
+      title: Row(children: [Icon(Icons.lock_open), 8.sbw, Text('解锁受限功能')]),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            MarkdownBody(data: markdownContent),
+            // 用户 ID 展示框
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Get.theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Get.theme.colorScheme.outline.withOpacity(0.3),
                 ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: SelectableText(
-                        userId,
-                        style: TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: Get.theme.colorScheme.primary,
-                        ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: SelectableText(
+                      userId,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Get.theme.colorScheme.primary,
                       ),
                     ),
-                    IconButton(
-                      icon: Icon(Icons.copy, size: 20),
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: userId));
-                        showSuccessSnackbar('已复制', '用户ID已复制到剪贴板');
-                      },
-                      tooltip: '复制ID',
-                    ),
-                  ],
-                ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.copy, size: 20),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: userId));
+                      showSuccessSnackbar('已复制', '用户ID已复制到剪贴板');
+                    },
+                    tooltip: '复制ID',
+                  ),
+                ],
               ),
-              SizedBox(height: 8),
-              MarkdownBody(
-                data: markdownContent2,
-                selectable: true,
-                onTapLink: (text, href, title) {
-                  if (href != null) {
-                    g_launchURL(Uri.parse(href));
-                  }
-                },
-              ),
-            ],
-          ),
+            ),
+            8.sbh,
+            MarkdownBody(
+              data: markdownContent2,
+              selectable: true,
+              onTapLink: (text, href, title) {
+                if (href != null) {
+                  g_launchURL(Uri.parse(href));
+                }
+              },
+            ),
+          ],
         ),
-      ),
+      ).sbw(double.maxFinite),
       actions: [
         TextButton(
           onPressed: () {
@@ -328,11 +324,15 @@ class _SupabasePlaylistContent extends StatelessWidget {
     }
   }
 
-  Future<void> _downloadPlaylist(PlaylistModel.SupabasePlaylist playlist) async {
+  Future<void> _downloadPlaylist(
+    PlaylistModel.SupabasePlaylist playlist,
+  ) async {
     await downloadSupabasePlaylist(playlist);
   }
 
-  Future<void> _overwritePlaylist(PlaylistModel.SupabasePlaylist playlist) async {
+  Future<void> _overwritePlaylist(
+    PlaylistModel.SupabasePlaylist playlist,
+  ) async {
     final success = await overwriteSupabasePlaylist(playlist);
     if (success) {
       _loadPlaylists(); // 刷新列表
@@ -357,25 +357,24 @@ class _SupabasePlaylistContent extends StatelessWidget {
           ),
         ),
         // 内容区域 - 使用 AnimatedSize 实现平滑高度变化
-        Obx(() => AnimatedSize(
-              duration: Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-              child: _buildContent(),
-            )),
+        Obx(
+          () => AnimatedSize(
+            duration: Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            child: _buildContent(),
+          ),
+        ),
         // 新建按钮
         Padding(
           padding: EdgeInsets.all(16),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _createNewPlaylist,
-              icon: Icon(Icons.add),
-              label: Text('新建歌单'),
-              style: ElevatedButton.styleFrom(
-                padding: EdgeInsets.symmetric(vertical: 12),
-              ),
+          child: ElevatedButton.icon(
+            onPressed: _createNewPlaylist,
+            icon: Icon(Icons.add),
+            label: Text('新建歌单'),
+            style: ElevatedButton.styleFrom(
+              padding: EdgeInsets.symmetric(vertical: 12),
             ),
-          ),
+          ).sbw(double.infinity),
         ),
       ],
     );
@@ -384,30 +383,25 @@ class _SupabasePlaylistContent extends StatelessWidget {
   Widget _buildContent() {
     if (isLoading.value)
       return Container(height: 300, child: Center(child: globalLoadingAnime));
-    
-    if (playlists.isEmpty)
-      return Container(
-        height: 300,
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.cloud_off, size: 64, color: Colors.grey),
-              SizedBox(height: 16),
-              Text(
-                '暂无歌单',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-              SizedBox(height: 8),
-              Text(
-                '点击下方按钮新建歌单',
-                style: TextStyle(fontSize: 14, color: Colors.grey),
-              ),
-            ],
-          ),
+
+    if (playlists.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.cloud_off, size: 64, color: Colors.grey),
+            16.sbh,
+            Text('暂无歌单', style: TextStyle(fontSize: 16, color: Colors.grey)),
+            8.sbh,
+            Text(
+              '点击下方按钮新建歌单',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+          ],
         ),
-      );
-    
+      ).sbh(300);
+    }
+
     return ListView.builder(
       shrinkWrap: true,
       physics: NeverScrollableScrollPhysics(),
@@ -416,7 +410,7 @@ class _SupabasePlaylistContent extends StatelessWidget {
       itemBuilder: (context, index) {
         final playlist = playlists[index];
         final settingsController = Get.find<SettingsController>();
-        
+
         return Card(
           margin: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
           child: Column(
@@ -436,28 +430,34 @@ class _SupabasePlaylistContent extends StatelessWidget {
                       '创建于: ${playlist.createdAt?.toString().substring(0, 19) ?? "未知"}\n'
                       '更新于: ${playlist.updatedAt?.toString().substring(0, 19) ?? "未知"}',
                     ),
-                    SizedBox(height: 4),
+                    4.sbh,
                     // 订阅开关
                     Obx(() {
                       final isSubscribed = isPlaylistSubscribed(playlist.id);
-                      
+
                       return Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            isSubscribed ? Icons.notifications_active : Icons.notifications_off,
+                            isSubscribed
+                                ? Icons.notifications_active
+                                : Icons.notifications_off,
                             size: 16,
-                            color: isSubscribed ? Get.theme.colorScheme.primary : Colors.grey,
+                            color: isSubscribed
+                                ? Get.theme.colorScheme.primary
+                                : Colors.grey,
                           ),
-                          SizedBox(width: 4),
+                          4.sbw,
                           Text(
                             isSubscribed ? '已订阅' : '未订阅',
                             style: TextStyle(
                               fontSize: 12,
-                              color: isSubscribed ? Get.theme.colorScheme.primary : Colors.grey,
+                              color: isSubscribed
+                                  ? Get.theme.colorScheme.primary
+                                  : Colors.grey,
                             ),
                           ),
-                          SizedBox(width: 8),
+                          8.sbw,
                           Transform.scale(
                             scale: 0.8,
                             child: Switch(
@@ -500,7 +500,7 @@ class _SupabasePlaylistContent extends StatelessWidget {
                       child: Row(
                         children: [
                           Icon(Icons.download, size: 20),
-                          SizedBox(width: 8),
+                          8.sbw,
                           Text('下载'),
                         ],
                       ),
@@ -510,7 +510,7 @@ class _SupabasePlaylistContent extends StatelessWidget {
                       child: Row(
                         children: [
                           Icon(Icons.upload, size: 20),
-                          SizedBox(width: 8),
+                          8.sbw,
                           Text('覆盖'),
                         ],
                       ),
@@ -520,7 +520,7 @@ class _SupabasePlaylistContent extends StatelessWidget {
                       child: Row(
                         children: [
                           Icon(Icons.edit, size: 20),
-                          SizedBox(width: 8),
+                          8.sbw,
                           Text('重命名'),
                         ],
                       ),
@@ -535,7 +535,7 @@ class _SupabasePlaylistContent extends StatelessWidget {
                             size: 20,
                             color: Get.theme.colorScheme.error,
                           ),
-                          SizedBox(width: 8),
+                          8.sbw,
                           Text(
                             '删除',
                             style: TextStyle(
@@ -555,3 +555,40 @@ class _SupabasePlaylistContent extends StatelessWidget {
     );
   }
 }
+
+Widget Function(Widget, Animation<double>) get setSubTitleTextTra =>
+    (Widget child, Animation<double> animation) {
+      return FadeTransition(
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeInCirc),
+
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.9, end: 1.0).animate(
+            CurvedAnimation(parent: animation, curve: Curves.easeInOut),
+          ),
+          child: child,
+        ),
+      );
+    };
+Widget Function(Widget? currentChild, List<Widget> previousChildren)
+get centerLeftLayoutBuilder =>
+    (Widget? currentChild, List<Widget> previousChildren) {
+      return Stack(
+        alignment: Alignment.centerLeft,
+        children: [...previousChildren, if (currentChild != null) currentChild],
+      );
+    };
+AnimatedSwitcher setSubTitleTextAniSwi(Widget child) {
+  return AnimatedSwitcher(
+    duration: const Duration(milliseconds: 200),
+    transitionBuilder: setSubTitleTextTra,
+    layoutBuilder: centerLeftLayoutBuilder,
+    child: child,
+  );
+}
+
+// AnimatedSwitcher(
+//   duration: const Duration(milliseconds: 200),
+//   transitionBuilder: setSubTitleTextTra,
+//   layoutBuilder: centerLeftLayoutBuilder,
+//   child:
+// ),

@@ -19,11 +19,10 @@ class _SearchlistinfoState extends State<Searchlistinfo>
 
     // 使用保存的 tab 索引初始化 TabController
     _tabController = TabController(
-      length: 2,
+      length: 3,
       vsync: this,
       initialIndex: controller!.currentTabIndex.value,
     );
-
     // 监听 TabController 的变化
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
@@ -33,6 +32,11 @@ class _SearchlistinfoState extends State<Searchlistinfo>
 
     // 每次进入页面时刷新平台设置
     controller?.refreshFromSettings();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!controller!.showSearchArea.value) {
+        controller!.focusNode.requestFocus();
+      }
+    });
   }
 
   @override
@@ -49,16 +53,29 @@ class _SearchlistinfoState extends State<Searchlistinfo>
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Expanded(
-              child: TextField(
-                focusNode: controller!.focusNode,
-                decoration: const InputDecoration(
-                  hintText: '请输入歌曲名，歌手或专辑',
-                  border: InputBorder.none,
-                ),
-                controller: controller!.searchTextController,
-                autofocus: true,
+              child: Obx(
+                () => !controller!.showSearchArea.value
+                    ? TabBar(
+                        controller: _tabController,
+                        tabs: const [
+                          Tab(text: '歌曲'),
+                          Tab(text: '歌单'),
+                          Tab(text: '播客'),
+                        ],
+                      )
+                    : TextField(
+                        focusNode: controller!.focusNode,
+                        decoration: const InputDecoration(
+                          hintText: '请输入歌曲名，歌手或专辑',
+                          border: InputBorder.none,
+                        ),
+                        controller: controller!.searchTextController,
+                        onSubmitted: (_) => controller!.onSubmitted(),
+                        autofocus: true,
+                      ),
               ),
             ),
+
             Obx(
               () => DropdownButton<String>(
                 value: controller!.selectedOption,
@@ -84,19 +101,22 @@ class _SearchlistinfoState extends State<Searchlistinfo>
       body: Column(
         children: [
           Obx(
-            () => AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              height: controller!.showTabBar.value ? 48 : 0,
-              child: controller!.showTabBar.value
-                  ? TabBar(
-                      controller: _tabController,
-                      tabs: const [
-                        Tab(text: '歌曲'),
-                        Tab(text: '歌单'),
-                      ],
-                    )
-                  : const SizedBox.shrink(),
-            ),
+            () => controller!.showSearchArea.value
+                ? AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    height: controller!.showTabBar.value ? 48 : 0,
+                    child: controller!.showTabBar.value
+                        ? TabBar(
+                            controller: _tabController,
+                            tabs: const [
+                              Tab(text: '歌曲'),
+                              Tab(text: '歌单'),
+                              Tab(text: '播客'),
+                            ],
+                          )
+                        : const SizedBox.shrink(),
+                  )
+                : const SizedBox.shrink(),
           ),
           Expanded(
             child: TabBarView(
@@ -104,6 +124,7 @@ class _SearchlistinfoState extends State<Searchlistinfo>
               children: [
                 _buildSongList(controller!),
                 _buildPlaylistList(controller!),
+                _buildDjList(controller!),
               ],
             ),
           ),
@@ -112,10 +133,41 @@ class _SearchlistinfoState extends State<Searchlistinfo>
     );
   }
 
+  Widget _buildErr(String err) {
+    return AbsorbPointer(
+      child: SizedBox.expand(
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '搜索失败,点击重试',
+                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                err,
+                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSongList(XSearchController controller) {
     return Obx(() {
       if (controller.loading.value) {
         return Center(child: globalLoadingAnime);
+      }
+
+      if (controller.resultErr != null) {
+        return GestureDetector(
+          onTap: () => controller.refreshSongSearch(),
+          child: _buildErr(controller.resultErr!),
+        );
       }
 
       return RefreshIndicator(
@@ -139,7 +191,9 @@ class _SearchlistinfoState extends State<Searchlistinfo>
 
             return ListTile(
               title: Text(track.title ?? ''),
-              subtitle: Text('${track.artist} - ${track.album}'),
+              subtitle: Text(
+                '${track.artist} - ${track.album}${track.totalDurMsg != null ? ' | ${track.totalDurMsg}' : ''}',
+              ),
               trailing: IconButton(
                 key: key,
                 icon: const Icon(Icons.more_vert),
@@ -156,6 +210,7 @@ class _SearchlistinfoState extends State<Searchlistinfo>
                   );
                 },
               ),
+
               onTap: () {
                 playsong(track, isByClick: true);
               },
@@ -171,7 +226,12 @@ class _SearchlistinfoState extends State<Searchlistinfo>
       if (controller.playlistLoading.value) {
         return Center(child: globalLoadingAnime);
       }
-
+      if (controller.playlistResultErr != null) {
+        return GestureDetector(
+          onTap: () => controller.refreshPlaylistSearch(),
+          child: _buildErr(controller.playlistResultErr!),
+        );
+      }
       return RefreshIndicator(
         onRefresh: () => controller.refreshPlaylistSearch(),
         child: ListView.builder(
@@ -206,6 +266,10 @@ class _SearchlistinfoState extends State<Searchlistinfo>
                               LoadState.failed) {
                             return const Icon(Icons.image_not_supported);
                           }
+                          if (state.extendedImageLoadState ==
+                              LoadState.loading) {
+                            return globalLoadingAnimeOfExtendedImage;
+                          }
                           return null;
                         },
                       ),
@@ -232,9 +296,9 @@ class _SearchlistinfoState extends State<Searchlistinfo>
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     )
                   : null,
-              trailing: playlist.count != null
+              trailing: playlist.count != null || playlist.totalDurMsg != null
                   ? Text(
-                      '${playlist.count} 首歌曲',
+                      '${playlist.count != null ? '${playlist.count} 首歌曲' : ''}${playlist.count != null && playlist.totalDurMsg != null ? ' | ' : ''}${playlist.totalDurMsg != null ? '${playlist.totalDurMsg}' : ''}',
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     )
                   : null,
@@ -242,6 +306,107 @@ class _SearchlistinfoState extends State<Searchlistinfo>
               onTap: () {
                 if (playlist.id != null) {
                   controller.toListByIDOrSearch(playlist.id!);
+                }
+              },
+            );
+          },
+        ),
+      );
+    });
+  }
+
+  Widget _buildDjList(XSearchController controller) {
+    return Obx(() {
+      if (controller.source.value != 'netease') {
+        return Center(
+          child: Text(
+            '当前平台不支持搜索播客',
+            style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+          ),
+        );
+      }
+      if (controller.djLoading.value) {
+        return Center(child: globalLoadingAnime);
+      }
+      if (controller.djResultErr != null) {
+        return GestureDetector(
+          onTap: () => controller.refreshDjSearch(),
+          child: _buildErr(controller.djResultErr!),
+        );
+      }
+      return RefreshIndicator(
+        onRefresh: () => controller.refreshDjSearch(),
+        child: ListView.builder(
+          key: const PageStorageKey<String>('djList'),
+          controller: controller.djScrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          itemCount:
+              controller.djs.length + (controller.djLoadingMore.value ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index >= controller.djs.length) {
+              return Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Center(child: globalLoadingAnime),
+              );
+            }
+
+            final dj = controller.djs[index];
+
+            return ListTile(
+              leading: dj.imgUrl != null && dj.imgUrl!.isNotEmpty
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: ExtendedImage.network(
+                        dj.imgUrl!,
+                        width: 56,
+                        height: 56,
+                        fit: BoxFit.cover,
+                        cache: true,
+                        loadStateChanged: (state) {
+                          if (state.extendedImageLoadState ==
+                              LoadState.failed) {
+                            return const Icon(Icons.image_not_supported);
+                          }
+                          if (state.extendedImageLoadState ==
+                              LoadState.loading) {
+                            return globalLoadingAnimeOfExtendedImage;
+                          }
+                          return null;
+                        },
+                      ),
+                    )
+                  : Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Icon(Icons.music_note),
+                    ),
+              title: Text(
+                dj.title ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: dj.author != null && dj.author!.isNotEmpty
+                  ? Text(
+                      dj.author!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    )
+                  : null,
+              trailing: dj.count != null
+                  ? Text(
+                      '${dj.count} 首歌曲',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    )
+                  : null,
+
+              onTap: () {
+                if (dj.id != null) {
+                  controller.toListByIDOrSearch(dj.id!);
                 }
               },
             );

@@ -1,5 +1,9 @@
 part of 'main.dart';
 
+RxInt testCount = 0.obs;
+
+bool testBtnoff = true;
+
 Widget get testBtn => Positioned.fill(
   child: SafeArea(
     top: false,
@@ -15,31 +19,24 @@ Widget get testBtn => Positioned.fill(
           children: [
             FloatingActionButton(
               heroTag: 'toast_count_btn',
-              onPressed: Get.find<UpdController>().checkReleasesUpdate,
-              child: Icon(Icons.format_list_numbered),
-            ),
-            FloatingActionButton(
-              onPressed: () async {
-                try {
-                  var box = await Hive.openBox(SettingsController.hiveStoreKey);
-                  await box.put('testKey', 'testValue');
-                  var value = box.get('testKey');
-                  logger.i('Hive test value: $value');
-                } catch (e) {
-                  logger.e(e);
+              onPressed: () {
+                testCount.value++;
+                if (testCount.value > 20) {
+                  testCount.value = 0;
                 }
               },
-              child: Icon(Icons.system_update_alt),
+              child: Obx(
+                () => AnimatedDigitWidget(
+                  value: testCount.value,
+                  enableMinIntegerDigits: true,
+                  fractionDigits: 0,
+                  textStyle: TextStyle(fontSize: 16, color: Colors.white),
+                ),
+              ),
             ),
             FloatingActionButton(
               onPressed: () async {
-                try {
-                  var box = await Hive.openBox('testBox');
-                  await box.delete('testKey');
-                  logger.i('Hive test key deleted');
-                } catch (e) {
-                  logger.e(e);
-                }
+                Get.find<PlayController>().test();
               },
               child: Icon(Icons.system_update_alt),
             ),

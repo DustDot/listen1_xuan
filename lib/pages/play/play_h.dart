@@ -59,7 +59,13 @@ Widget playH() {
                 cache: true,
                 loadStateChanged: (state) {
                   if (state.extendedImageLoadState == LoadState.failed) {
-                    return Icon(Icons.music_note, size: 168.w);
+                    return Icon(
+                      Icons.music_note,
+                      size: globalHorizon ? 50 : 168.w,
+                    );
+                  }
+                  if (state.extendedImageLoadState == LoadState.loading) {
+                    return globalLoadingAnimeOfExtendedImage;
                   }
                 },
               ),
@@ -81,15 +87,20 @@ Widget playH() {
                       child: Obx(() {
                         Track? mediaItem =
                             _playController.nowPlayingTrackRx.value;
-                        return Text(
-                          '${mediaItem?.title ?? 'null'}  -  ${mediaItem?.artist ?? 'null'}',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                        return AnimatedSwitcher(
+                          duration: Duration(milliseconds: 200),
+                          transitionBuilder: horTitleTextTra,
+                          child: Text(
+                            key: ValueKey(mediaItem?.id ?? 'null'),
+                            '${mediaItem?.title ?? 'null'}  -  ${mediaItem?.artist ?? 'null'}',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         );
                       }),
                     ),
@@ -98,30 +109,30 @@ Widget playH() {
                       child: Center(
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
-                          child: Obx(
-                            () => _playController.loading
-                                ? Obx(
-                                    () => Text(
-                                      (_playController
-                                                  .bootStraping[_playController
-                                                  .nowPlayingTrackRx
-                                                  .value
-                                                  ?.id] ??
-                                              '加载中...')
-                                          .toString(),
-                                      style: TextStyle(fontSize: 20.0),
-                                    ),
-                                  )
-                                : StreamBuilder<MediaState>(
-                                    stream: _mediaStateStream,
-                                    builder: (context, snapshot) {
-                                      MediaState? mediaState = snapshot.data;
-                                      return Text(
-                                        ('${formatDuration(mediaState?.position ?? Duration.zero)} / ${formatDuration(mediaState?.duration ?? Duration.zero)}'),
+                          child: StreamBuilder(
+                            stream: _playController.bootStraping.stream,
+                            builder: (context, snapshot) => AnimatedSwitcher(
+                              duration: Duration(milliseconds: 200),
+                              transitionBuilder: horTitleTextTra,
+                              child: playController.loading
+                                  ? Obx(
+                                      () => Text(
+                                        key: ValueKey('loading-media-state'),
+                                        (playController
+                                                    .bootStraping[playController
+                                                    .nowPlayingTrackRx
+                                                    .value
+                                                    ?.id] ??
+                                                '加载中...')
+                                            .toString(),
                                         style: TextStyle(fontSize: 20.0),
-                                      );
-                                    },
-                                  ),
+                                      ),
+                                    )
+                                  : KeyedSubtree(
+                                      key: ValueKey('playing-media-state'),
+                                      child: formatMediaStateByParts(),
+                                    ),
+                            ),
                           ),
                         ),
                       ),
@@ -152,40 +163,27 @@ Widget playH() {
                             ),
                           ),
                         )
-                      : StreamBuilder<MediaState>(
-                          stream: _mediaStateStream,
-                          builder: (context, snapshot) {
-                            final position = snapshot.data;
-                            MediaState? mediaState = snapshot.data;
-                            return MaterialWaveSlider(
-                              key: materialWaveSliderStateKeyH,
-                              height: 20,
-                              paused: !(mediaState?.playing ?? false),
-                              value:
-                                  (mediaState?.position.inMilliseconds
-                                              .toDouble() ??
-                                          0.0) >
-                                      (mediaState?.duration.inMilliseconds
-                                              .toDouble() ??
-                                          0.0)
-                                  ? (mediaState?.duration.inMilliseconds
-                                            .toDouble() ??
-                                        0.0)
-                                  : (mediaState?.position.inMilliseconds
-                                            .toDouble() ??
-                                        0.0),
-                              max:
-                                  mediaState?.duration.inMilliseconds
-                                      .toDouble() ??
-                                  0.0,
-                              onChanged: (value) {
-                                globalSeek(
-                                  Duration(milliseconds: value.toInt()),
-                                );
-                              },
-                            );
-                          },
-                        ),
+                      : Obx(() {
+                          final mediaState = _playController.mediaState.value;
+                          return MaterialWaveSlider(
+                            key: materialWaveSliderStateKeyH,
+                            height: 20,
+                            paused:
+                                !mediaState.playing ||
+                                Get.find<ThemeController>().disSomeEffect,
+                            value:
+                                (mediaState.position.inMilliseconds
+                                        .toDouble()) >
+                                    (mediaState.duration.inMilliseconds
+                                        .toDouble())
+                                ? mediaState.duration.inMilliseconds.toDouble()
+                                : mediaState.position.inMilliseconds.toDouble(),
+                            max: mediaState.duration.inMilliseconds.toDouble(),
+                            onChanged: (value) {
+                              globalSeek(Duration(milliseconds: value.toInt()));
+                            },
+                          );
+                        }),
                 ),
               ),
             ],
@@ -205,15 +203,7 @@ Widget playH() {
                   (_buttonKey.currentContext!.findRenderObject() as RenderBox)
                       .localToGlobal(Offset.zero),
             );
-            if (ret != null) {
-              if (ret["push"] != null) {
-                Get.toNamed(
-                  ret["push"],
-                  arguments: {'listId': ret["push"], 'is_my': false},
-                  id: 1,
-                );
-              }
-            }
+           
           },
         ),
         Obx(
@@ -242,9 +232,7 @@ Widget playH() {
             child: IconButton(
               tooltip: '正在播放列表',
               icon: Icon(Icons.playlist_play_rounded),
-              onPressed: () async {
-                Get.toNamed(RouteName.nowPlayingPage, id: 1);
-              },
+              onPressed: _openNowPlayListPage,
             ),
           ),
         ),

@@ -3,19 +3,20 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
-import 'package:listen1_xuan/funcs.dart';
 import 'package:logger/logger.dart';
 import 'package:native_dio_adapter/native_dio_adapter.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:uuid/uuid.dart';
 import '../global_settings_animations.dart';
+import '../constants/network_defaults.dart';
 import '../settings.dart';
 import 'settings_controller.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 
 Dio get dioWithCookieManager => Get.find<DioController>().dioWithCookieManager;
 Dio get dioWithProxyAdapter => Get.find<DioController>().dioWithProxyAdapter;
+
 class DioController extends GetxController {
   static const String _tag = 'DioController';
   Logger _logger = Logger();
@@ -23,23 +24,25 @@ class DioController extends GetxController {
   final dioWithCookieManager = Dio();
   final dioWithProxyAdapter = Dio();
 
-  @override
-  void onInit() {
-    super.onInit();
-    loadConfig();
-  }
-
-  void loadConfig() {
-    reloadCookie();
+  Future<void> loadConfig() async {
+    _applyDefaultHeaders();
+    await reloadCookie();
     loadProxy();
   }
 
+  void _applyDefaultHeaders() {
+    dioWithCookieManager.options.headers['user-agent'] =
+        kGlobalDefaultUserAgent;
+    dioWithProxyAdapter.options.headers['user-agent'] = kGlobalDefaultUserAgent;
+  }
+
   void loadProxy() {
+    // if(kDebugMode)
     // dioWithCookieManager.httpClientAdapter = IOHttpClientAdapter(
     //   createHttpClient: () {
     //     final client = HttpClient();
     //     client.findProxy = (uri) {
-    //       return 'PROXY 192.168.2.123:9000';
+    //       return 'PROXY 172.16.1.99:9000';
     //     };
     //     return client;
     //   },
@@ -78,6 +81,7 @@ class DioController extends GetxController {
             cookiePath(await getApplicationDocumentsDirectory()),
           ),
         ),
+        ignoreInvalidCookies: true,
       ),
     );
   }

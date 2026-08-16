@@ -5,12 +5,17 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_linux
   charset_converter
+  desktop_drop
   dynamic_color
   flutter_acrylic
+  flutter_volume_controller
   gtk
   hotkey_manager_linux
+  irondash_engine_context
   media_kit_libs_linux
+  pasteboard
   screen_retriever_linux
+  super_native_extensions
   tray_manager
   url_launcher_linux
   window_manager

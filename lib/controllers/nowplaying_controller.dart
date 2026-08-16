@@ -25,9 +25,9 @@ class NowPlayingPageController extends GetxController {
     searchController = TextEditingController();
     searchFocusNode.addListener(() {
       if (searchFocusNode.hasFocus) {
-        set_inapp_hotkey(false);
+        setInAppHotKeyEnable(false);
       } else {
-        set_inapp_hotkey(true);
+        setInAppHotKeyEnable(true);
       }
     });
     // 监听搜索框变化
@@ -61,11 +61,6 @@ class NowPlayingPageController extends GetxController {
     super.onClose();
   }
 
-  // 获取单个项目的实际高度（根据平台调整）
-  double get itemHeight {
-    return 44.0; // 默认值
-  }
-
   void playTrack(Track track) {
     playsong(track, isByClick: true);
     HapticFeedback.lightImpact();
@@ -83,10 +78,6 @@ class NowPlayingPageController extends GetxController {
 
   void reorderPlaylist(int oldIndex, int newIndex) {
     final currentList = List<Track>.from(playController.current_playing);
-
-    if (newIndex > oldIndex) {
-      newIndex -= 1;
-    }
 
     final track = currentList.removeAt(oldIndex);
     currentList.insert(newIndex, track);

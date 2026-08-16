@@ -1,9 +1,11 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide CircularProgressIndicator;
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:listen1_xuan/controllers/supabase_auth_controller.dart';
 import 'package:listen1_xuan/controllers/routeController.dart';
 import 'package:listen1_xuan/funcs.dart';
+import 'package:listen1_xuan/widgets/ext/ext_widget.dart';
+import 'package:listen1_xuan/widgets/progress_indicator_xuan.dart';
 
 import '../../global_settings_animations.dart';
 
@@ -57,23 +59,23 @@ class _SupabasePasswordLoginPageState extends State<SupabasePasswordLoginPage> {
 
     _emailFocusNode.addListener(() {
       if (_emailFocusNode.hasFocus) {
-        set_inapp_hotkey(false);
+        setInAppHotKeyEnable(false);
       } else {
-        set_inapp_hotkey(true);
+        setInAppHotKeyEnable(true);
       }
     });
     _passwordFocusNode.addListener(() {
       if (_passwordFocusNode.hasFocus) {
-        set_inapp_hotkey(false);
+        setInAppHotKeyEnable(false);
       } else {
-        set_inapp_hotkey(true);
+        setInAppHotKeyEnable(true);
       }
     });
     _confirmPasswordFocusNode.addListener(() {
       if (_confirmPasswordFocusNode.hasFocus) {
-        set_inapp_hotkey(false);
+        setInAppHotKeyEnable(false);
       } else {
-        set_inapp_hotkey(true);
+        setInAppHotKeyEnable(true);
       }
     });
   }
@@ -102,13 +104,13 @@ class _SupabasePasswordLoginPageState extends State<SupabasePasswordLoginPage> {
           () => Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 20),
+              20.sbh,
               Icon(
                 _isSignUpMode.value ? Icons.person_add : Icons.email,
                 size: 80,
                 color: Colors.blue,
               ),
-              const SizedBox(height: 40),
+              40.sbh,
               // 邮箱输入框
               TextFormField(
                 controller: _emailController,
@@ -133,7 +135,7 @@ class _SupabasePasswordLoginPageState extends State<SupabasePasswordLoginPage> {
                   return null;
                 },
               ),
-              const SizedBox(height: 20),
+              20.sbh,
               // 密码输入框
               TextFormField(
                 controller: _passwordController,
@@ -167,7 +169,7 @@ class _SupabasePasswordLoginPageState extends State<SupabasePasswordLoginPage> {
                   return null;
                 },
               ),
-              const SizedBox(height: 20),
+              20.sbh,
               // 确认密码输入框（仅注册模式显示）
               if (_isSignUpMode.value)
                 Column(
@@ -202,7 +204,7 @@ class _SupabasePasswordLoginPageState extends State<SupabasePasswordLoginPage> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 20),
+                    20.sbh,
                   ],
                 ),
               // 登录/注册按钮
@@ -210,35 +212,25 @@ class _SupabasePasswordLoginPageState extends State<SupabasePasswordLoginPage> {
                 () => ElevatedButton(
                   onPressed: _authController.isLoading.value
                       ? null
-                      : () => _isSignUpMode.value
-                          ? _signUp()
-                          : _signIn(),
+                      : () => _isSignUpMode.value ? _signUp() : _signIn(),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     minimumSize: const Size(double.infinity, 50),
                   ),
                   child: _authController.isLoading.value
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
-                        )
+                      ? CircularProgressIndicator(strokeWidth: 2).sbs(20)
                       : Text(
                           _isSignUpMode.value ? '注册' : '登录',
                           style: const TextStyle(fontSize: 16),
                         ),
                 ),
               ),
-              const SizedBox(height: 20),
+              20.sbh,
               // 切换模式
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    _isSignUpMode.value ? '已有账户？' : '没有账户？',
-                  ),
+                  Text(_isSignUpMode.value ? '已有账户？' : '没有账户？'),
                   TextButton(
                     onPressed: () {
                       _isSignUpMode.toggle();
@@ -252,12 +244,10 @@ class _SupabasePasswordLoginPageState extends State<SupabasePasswordLoginPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              20.sbh,
               // 分隔线
-              const Divider(
-                thickness: 1,
-              ),
-             
+              const Divider(thickness: 1),
+
               // 错误消息
               Obx(
                 () => _authController.errorMessage.value.isNotEmpty
@@ -274,7 +264,7 @@ class _SupabasePasswordLoginPageState extends State<SupabasePasswordLoginPage> {
                           style: TextStyle(color: Colors.red.shade700),
                         ),
                       )
-                    : const SizedBox.shrink(),
+                    : SizedBox.shrink(),
               ),
             ],
           ),

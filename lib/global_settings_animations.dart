@@ -1,22 +1,24 @@
 import 'package:adaptive_theme/adaptive_theme.dart';
+import 'package:extended_image/extended_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:listen1_xuan/play.dart';
-import 'package:loading_animations/loading_animations.dart';
 import 'package:animations/animations.dart';
 import 'package:universal_io/io.dart' as universal_io;
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:hotkey_manager/hotkey_manager.dart';
-import 'const.dart';
+import 'constants/const.dart';
 import 'controllers/settings_controller.dart';
 import 'funcs.dart';
 import 'settings.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path/path.dart' as p;
+import 'package:expressive_loading_indicator/expressive_loading_indicator.dart';
+import 'package:material_new_shapes/material_new_shapes.dart';
 
 Future<Directory> xuanGetdataDirectory() async {
   if (isAndroid || isIos) {
@@ -75,7 +77,7 @@ final bool isDesktop =
 final bool isMobile =
     universal_io.Platform.isIOS || universal_io.Platform.isAndroid;
 void init_hotkeys() async {
-  var settings = settings_getsettings();
+  var settings = lengcyGetSettings();
   var hotskeys = settings["hotkeys"];
   if (hotskeys == null) {
     hotskeys = {
@@ -130,7 +132,7 @@ Map<LogicalKeyboardKey, dynamic> inappShortcuts = {
   LogicalKeyboardKey.period: globalSkipToNext,
 };
 bool enable_inapp_hotkey = true;
-void set_inapp_hotkey(enable) {
+void setInAppHotKeyEnable(enable) {
   enable_inapp_hotkey = enable;
 }
 
@@ -204,7 +206,7 @@ List<Widget> create_hotkey_btns(context) {
           value: enable_hotkey,
           onChanged: (bool value) async {
             enable_hotkey = value;
-            var settings = settings_getsettings();
+            var settings = lengcyGetSettings();
             var hotkeys = settings['hotkeys'];
             hotkeys['enable'] = value;
             settings['hotkeys'] = hotkeys;
@@ -221,7 +223,7 @@ List<Widget> create_hotkey_btns(context) {
     ...s_hotkeys.map((_hotkey) {
       return TextButton(
         onPressed: () async {
-          var settings = settings_getsettings();
+          var settings = lengcyGetSettings();
           var hotkeys = settings['hotkeys'];
           var hotkeyData = hotkeys[_hotkey['hotkey']];
           var hotkey = hotkeyData == null ? null : HotKey.fromJson(hotkeyData);
@@ -265,9 +267,39 @@ List<Widget> create_hotkey_btns(context) {
   ];
 }
 
-Widget get globalLoadingAnime => LoadingBouncingGrid.square(
-  backgroundColor: AdaptiveTheme.of(Get.context!).theme.colorScheme.primary,
+Widget get globalLoadingAnime => ExpressiveLoadingIndicator(
+  // Custom size constraints
+  constraints: BoxConstraints(
+    minWidth: 64.0,
+    minHeight: 64.0,
+    maxWidth: 64.0,
+    maxHeight: 64.0,
+  ),
+
+  // Custom polygon shapes
+  polygons: [
+    MaterialShapes.softBurst,
+    MaterialShapes.pentagon,
+    MaterialShapes.pill,
+    MaterialShapes.pentagon,
+    MaterialShapes.square,
+  ],
+
+  // Accessibility
+  semanticsLabel: 'Loading',
+  semanticsValue: 'In progress',
 );
+
+Widget get globalLoadingAnimeOfExtendedImage =>
+    Center(child: globalLoadingAnime);
+Widget? loadStateChanged(ExtendedImageState state) {
+  if (state.extendedImageLoadState == LoadState.loading) {
+    return globalLoadingAnimeOfExtendedImage;
+  }
+
+  return null;
+}
+
 Widget search_Animation({
   required Animation<double> animation,
   required Animation<double> secondaryAnimation,

@@ -100,7 +100,7 @@ Widget _buildSupabasePanel() {
                 ),
               ],
             ),
-            SizedBox(height: 16),
+            16.sbh,
             Wrap(
               alignment: WrapAlignment.spaceEvenly,
               runAlignment: WrapAlignment.center,
@@ -208,7 +208,7 @@ Widget _buildSupabasePanel() {
               '使用 Supabase 账号可以同步您的数据',
               style: TextStyle(color: Colors.grey),
             ),
-            SizedBox(height: 16),
+            16.sbh,
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -222,7 +222,7 @@ Widget _buildSupabasePanel() {
                     style: ElevatedButton.styleFrom(minimumSize: Size(0, 45)),
                   ),
                 ),
-                SizedBox(width: 12),
+                12.sbw,
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: () {
@@ -269,6 +269,7 @@ Widget _buildThirdPartyLoginPanel(
                   width: 18,
                   height: 18,
                   cache: true,
+                  loadStateChanged: loadStateChanged,
                 ),
 
                 ExtendedImage.network(
@@ -276,6 +277,7 @@ Widget _buildThirdPartyLoginPanel(
                   cache: true,
                   width: 18,
                   height: 18,
+                  loadStateChanged: loadStateChanged,
                 ),
 
                 Iconify(
@@ -419,7 +421,8 @@ Widget _buildThirdPartyLoginPanel(
 
 /// 显示修改昵称对话框
 void _showEditNicknameDialog(SupabaseAuthController authController) async {
-  await showInputDialog(
+  bool mod = false;
+  showInputDialog(
     title: '修改昵称',
     placeholder: '请输入新昵称',
     initialValue: authController.userNickname ?? '',
@@ -433,13 +436,17 @@ void _showEditNicknameDialog(SupabaseAuthController authController) async {
     onConfirm: (nickname) async {
       final success = await authController.updateNickname(nickname);
       if (success) {
-        showSuccessSnackbar(null, '昵称修改成功');
+        mod = true;
         return true;
       } else {
         throw authController.errorMessage.value;
       }
     },
-  );
+  ).then((value) {
+    if (mod) {
+      showSuccessSnackbar('昵称修改成功', null);
+    }
+  });
 }
 
 /// 显示密码管理对话框
@@ -458,7 +465,7 @@ void _showPasswordManagementDialog(SupabaseAuthController authController) {
                 style: TextStyle(fontSize: 13, color: Colors.grey),
               ),
             ),
-          const SizedBox(height: 8),
+          8.sbh,
         ],
       ),
       actions: [
@@ -499,7 +506,7 @@ void _showOpacityDialog() {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(height: 16),
+              16.sbh,
               Row(
                 children: [
                   Text('透明'),
@@ -520,7 +527,7 @@ void _showOpacityDialog() {
                   Text('不透明'),
                 ],
               ),
-              SizedBox(height: 8),
+              8.sbh,
               Text(
                 '提示: 255为完全不透明，0为完全透明',
                 style: TextStyle(fontSize: 12, color: Colors.grey),
@@ -531,6 +538,7 @@ void _showOpacityDialog() {
         );
       },
     ),
+    barrierColor: Colors.transparent,
   );
 }
 
@@ -561,6 +569,26 @@ List<Widget> get cacheSettingsTiles => [
       clean_local_cache(true);
     },
     child: const Text('清除所有歌曲缓存'),
+  ),
+  Obx(
+    () => SwitchListTile(
+      title: const Text('禁用歌曲缓存下载'),
+      subtitle: Text('开启后将不再下载歌曲缓存，已下载的缓存仍可使用'),
+      value: Get.find<SettingsController>().disableSongDownload,
+      onChanged: (bool value) {
+        Get.find<SettingsController>().disableSongDownload = value;
+      },
+    ),
+  ),
+  Obx(
+    () => SwitchListTile(
+      title: const Text('禁用歌词缓存下载'),
+      subtitle: Text('开启后将不再下载歌词缓存，已下载的缓存仍可使用'),
+      value: Get.find<SettingsController>().disableLyricDownload,
+      onChanged: (bool value) {
+        Get.find<SettingsController>().disableLyricDownload = value;
+      },
+    ),
   ),
   ListTile(
     leading: Icon(Icons.edit),
@@ -696,6 +724,20 @@ List<Widget> get notificationSettingsTiles => [
             },
     ),
   ),
+  Obx(
+    () => SwitchListTile(
+      title: const Text('使用Album字段显示当前播放时长'),
+      subtitle: GestureDetector(
+        onLongPress: () => g_launchURL(
+          Uri.parse('https://github.com/HBWuChang/listen1_xuan/issues/36'),
+        ),
+        child: Text('@Gitkila'),
+      ),
+      value: Get.find<SettingsController>().showTimeInNotify,
+      onChanged: (bool value) =>
+          Get.find<SettingsController>().showTimeInNotify = value,
+    ),
+  ),
 ];
 
 enum AudioServiceButtonActions {
@@ -780,19 +822,28 @@ Widget get themeSettingsTiles => Column(
         showThemeDialog();
       },
     ),
-    OpenContainer(
-      closedColor: AdaptiveTheme.of(Get.context!).theme.cardColor,
-      openColor: AdaptiveTheme.of(Get.context!).theme.scaffoldBackgroundColor,
-      closedBuilder: (context, _) => ListTile(
-        leading: Icon(Icons.smart_button_rounded),
-        title: Text('竖屏播放栏按钮'),
-        trailing: Icon(Icons.unfold_more_rounded),
+    ValueListenableBuilder<AdaptiveThemeMode>(
+      valueListenable: AdaptiveTheme.of(Get.context!).modeChangeNotifier,
+      builder: (context, mode, child) => OpenContainer(
+        closedColor: AdaptiveTheme.of(Get.context!).theme.cardColor,
+        openColor: AdaptiveTheme.of(Get.context!).theme.scaffoldBackgroundColor,
+        closedBuilder: (context, _) => ListTile(
+          leading: Icon(Icons.smart_button_rounded),
+          title: Text('竖屏播放栏按钮'),
+          trailing: Icon(Icons.unfold_more_rounded),
+        ),
+        openBuilder: (context, _) {
+          return PlayButtonsSettingsPage();
+        },
       ),
-      openBuilder: (context, _) {
-        return PlayButtonsSettingsPage();
-      },
     ),
 
+    SwitchListTile(
+      title: Text('当不处于活动状态时禁用一些效果来减少GPU占用'),
+      value: Get.find<SettingsController>().disableSomeEffectWhenInactive,
+      onChanged: (bool value) =>
+          Get.find<SettingsController>().disableSomeEffectWhenInactive = value,
+    ),
     if (isDesktop)
       ListTile(
         leading: Icon(Icons.opacity_rounded),
@@ -870,26 +921,7 @@ Widget get themeSettingsTiles => Column(
           Get.find<SettingsController>().lyricBackgroundBlurRadius.toString(),
         );
       }),
-      onTap: () async {
-        await showInputDialog(
-          title: '歌词背景高斯模糊距离',
-          message: '数值越大,模糊效果越明显',
-          initialValue: Get.find<SettingsController>().lyricBackgroundBlurRadius
-              .toString(),
-          onConfirm: (value) async {
-            if (isEmpty(value)) return false;
-            double? intValue = double.tryParse(value);
-            if (intValue == null || intValue < 0) {
-              throw '请输入有效的数值';
-            }
-            Get.find<SettingsController>().lyricBackgroundBlurRadius = intValue
-                .toDouble();
-            showSuccessSnackbar('设置成功', null);
-            return true;
-          },
-          keyboardType: TextInputType.number,
-        );
-      },
+      onTap: showLyricBackgroundBlurRadiusInputDialog,
     ),
     ListTile(
       leading: Icon(Icons.border_outer_rounded),
@@ -1010,7 +1042,7 @@ class _SupabaseTokenManagementContent extends StatelessWidget {
       showInfoSnackbar('正在下载', null);
       final success = await authController.downloadAllTokens();
       if (success) {
-        showSuccessSnackbar('一键下载成功', '请重启应用以生效');
+        showSuccessSnackbar('一键下载成功', null);
       } else {
         showErrorSnackbar('一键下载失败', authController.errorMessage.value);
       }
@@ -1034,6 +1066,7 @@ class _SupabaseTokenManagementContent extends StatelessWidget {
         platformCode,
         localToken,
       );
+      logger.d('上传 $platformName Token $localToken');
       if (success) {
         showSuccessSnackbar('上传成功', null);
         await _loadCloudTokens();
@@ -1052,8 +1085,10 @@ class _SupabaseTokenManagementContent extends StatelessWidget {
         platformCode,
       );
       if (cloudToken != null && cloudToken.isNotEmpty) {
-        await savePlatformToken(platformCode, cloudToken);
-        showSuccessSnackbar('下载成功', '请重启应用以生效');
+        await savePlatformToken(
+          PlatformCredentials(platform: platformCode, credentials: cloudToken),
+        );
+        showSuccessSnackbar('下载成功', null);
       } else {
         showErrorSnackbar('下载失败', '云端 Token 为空');
       }
@@ -1146,7 +1181,7 @@ class _SupabaseTokenManagementContent extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              12.sbw,
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: _downloadAllTokens,
@@ -1160,9 +1195,9 @@ class _SupabaseTokenManagementContent extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 16),
+        16.sbh,
         const Divider(),
-        const SizedBox(height: 8),
+        8.sbh,
         // 各平台操作列表
         ListView.builder(
           shrinkWrap: true,
@@ -1236,7 +1271,7 @@ class _SupabaseTokenManagementContent extends StatelessWidget {
             });
           },
         ),
-        const SizedBox(height: 16),
+        16.sbh,
       ],
     );
   }

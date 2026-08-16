@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:async/async.dart';
 import 'package:get/get.dart';
+import 'package:listen1_xuan/constants/const.dart';
 import 'package:listen1_xuan/controllers/controllers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'bl.dart';
@@ -34,7 +35,7 @@ class Provider {
 
 final List<Provider> providers = [
   Provider(
-    name: 'netease',
+    name: PlatformSource.netease.name,
     instance: netease,
     // instance: null,
     searchable: true,
@@ -51,7 +52,7 @@ final List<Provider> providers = [
     hidden: true,
   ),
   Provider(
-    name: 'qq',
+    name: PlatformSource.qq.name,
     instance: qq,
     // instance: null,
     searchable: true,
@@ -59,7 +60,7 @@ final List<Provider> providers = [
     id: 'qq',
   ),
   Provider(
-    name: 'kugou',
+    name: PlatformSource.kugou.name,
     instance: kugou,
     // instance: null,
     searchable: true,
@@ -75,7 +76,7 @@ final List<Provider> providers = [
     id: 'kw',
   ),
   Provider(
-    name: 'bilibili',
+    name: PlatformSource.bilibili.name,
     instance: bilibili,
     searchable: true,
     supportLogin: false,
@@ -138,6 +139,9 @@ String? getProviderNameByItemId(String itemId) {
 }
 
 dynamic getProviderByItemId(String itemId) {
+  if (itemId.length < 2) {
+    return null;
+  }
   String prefix = itemId.substring(0, 2);
   return providers.firstWhere((i) => i.id == prefix).instance;
 }
@@ -200,10 +204,6 @@ class MediaService {
     return provider.search(url);
   }
 
-  static dynamic showMyPlaylist() {
-    return myplaylist.show_myplaylist('my');
-  }
-
   static Future<dynamic> showPlaylistArray(
     String source,
     int offset,
@@ -230,10 +230,6 @@ class MediaService {
     final url =
         '/lyric?${queryStringify({'track_id': trackId, 'album_id': albumId, 'lyric_url': lyricUrl, 'tlyric_url': tlyricUrl})}';
     return provider.lyric(url);
-  }
-
-  static dynamic showFavPlaylist() {
-    return myplaylist.show_myplaylist('favorite');
   }
 
   static dynamic queryPlaylist(String listId, String type) {

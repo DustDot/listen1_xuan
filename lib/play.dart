@@ -1,22 +1,27 @@
 import 'package:adaptive_theme/adaptive_theme.dart';
-import 'package:flutter/material.dart';
+import 'package:figma_squircle/figma_squircle.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart' hide CircularProgressIndicator;
 import 'dart:async';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_lyric/core/lyric_model.dart';
-// import 'package:flutter_lyric/lyrics_reader_model.dart';
+import 'package:flutter/material.dart'
+    hide CircularProgressIndicator, LinearProgressIndicator;
 import 'package:listen1_xuan/bodys.dart';
 import 'package:listen1_xuan/controllers/controllers.dart';
-import 'package:listen1_xuan/controllers/upd_controller.dart';
+import 'package:listen1_xuan/controllers/theme.dart';
 import 'package:listen1_xuan/main.dart';
 import 'dart:io';
 import 'package:extended_image/extended_image.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:listen1_xuan/pages/lyric/lyric_page.dart';
+import 'package:listen1_xuan/widgets/ext/ext_widget.dart';
+import 'package:listen1_xuan/widgets/motor_progress_indicator_xuan.dart';
 import 'package:media_kit/media_kit.dart' show Player;
 import 'package:rxdart/rxdart.dart' as rxdart;
 import 'package:flutter/foundation.dart';
 import 'package:smooth_sheets/smooth_sheets.dart';
+import 'constants/network_defaults.dart';
 import 'funcs.dart';
 import 'package:vibration/vibration.dart';
 import 'package:logger/logger.dart';
@@ -33,9 +38,9 @@ import 'package:material_wave_slider/material_wave_slider.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 import 'widgets/container_with_outer_shadow.dart';
 import 'package:media_kit/media_kit.dart' hide Track;
+import 'package:animated_digit/animated_digit.dart';
+import 'widgets/showVolumeSlider.dart';
 
-part 'pages/play/play_v.dart';
-// part 'pages/play/play_v0.dart';
 part 'pages/play/play_v2.dart';
 part 'pages/play/play_h.dart';
 part 'pages/play/play_widgets.dart';
@@ -126,9 +131,16 @@ Future<void> onPlaybackCompleted({
     final index = nowplaying_track['index'];
     switch (playmode.value) {
       case 0:
-        index + 1 < current_playing.length
-            ? await playsong(current_playing[index + 1], start: start)
-            : await playsong(current_playing[0], start: start);
+        if (index + 1 < current_playing.length) {
+          await playsong(current_playing[index + 1], start: start);
+        } else {
+          if (Get.find<SettingsController>().stopOnPlayListEnd) {
+            await globalPause();
+            await globalSeek(Duration.zero);
+          } else {
+            await playsong(current_playing[0], start: start);
+          }
+        }
         break;
       case 1:
         int t = randommodetemplist
@@ -243,10 +255,15 @@ Future<void> bind_smtc() async {
 }
 
 MediaItem? _currentMediaItem;
+MediaItem? _currentShowMediaItem;
+MediaItem? get showItem => _currentShowMediaItem ?? _currentMediaItem;
+int lastSec = 0;
+String get fSec => formatDuration(Duration(seconds: lastSec));
 Future<void> change_playback_state(
   Track? track, {
   LyricLine? lyric,
   bool onDisableLyricUpdate = false,
+  int? sec,
 }) async {
   try {
     if (onDisableLyricUpdate && _currentMediaItem != null) {
@@ -254,41 +271,22 @@ Future<void> change_playback_state(
           .change_playbackstate(_currentMediaItem!);
     }
     if (lyric != null) {
-      // if (_currentMediaItem == null || isEmpty(lyric.mainText)) return;
-      // bool useTitleInsteadOfDisplayTitle =
-      //     Get.find<SettingsController>().tryShowLyricInNotificationInTitle;
-      // bool showTranslation =
-      //     Get.find<SettingsController>().showLyricTranslation.value;
-      // MediaItem _item = _currentMediaItem!.copyWith(
-      //   displayTitle: useTitleInsteadOfDisplayTitle ? null : lyric.mainText,
-      //   title: useTitleInsteadOfDisplayTitle
-      //       ? '${lyric.mainText!}${showTranslation && lyric.hasExt ? '\n${lyric.extText}' : ''}'
-      //       : _currentMediaItem!.title,
-      //   artist: _currentMediaItem!.title,
-      //   album:
-      //       '${_currentMediaItem?.artist}${_currentMediaItem?.album != null ? ' - ${_currentMediaItem!.album}' : ''}',
-      // );
-      // if (showTranslation) {
-      //   _item = _item.copyWith(
-      //     displaySubtitle: (lyric.hasExt ? lyric.extText : null),
-      //   );
-      // }
-      if (_currentMediaItem == null) return;
+      if (showItem == null) return;
       bool show = Get.find<SettingsController>().tryShowLyricInNotification;
       bool showInTitle =
           Get.find<SettingsController>().tryShowLyricInNotificationInTitle;
       bool showTra = Get.find<SettingsController>().showLyricTranslation.value;
       if (!show && !showInTitle) return;
       if (((isAndroid && show) || !isAndroid) && showInTitle) {
-        MediaItem _item = _currentMediaItem!.copyWith(
+        MediaItem _item = showItem!.copyWith(
           title:
               '${lyric.text}${!isEmpty(lyric.translation) && showTra ? '\n${lyric.translation}' : ''}',
-          artist: '${_currentMediaItem!.title} - ${_currentMediaItem!.artist}',
+          artist: '${showItem!.title} - ${showItem!.artist}',
         );
         (Get.find<AudioHandlerController>().audioHandler as AudioPlayerHandler)
             .change_playbackstate(_item);
       } else if (isAndroid && show) {
-        MediaItem _item = _currentMediaItem!.copyWith(displayTitle: lyric.text);
+        MediaItem _item = showItem!.copyWith(displayTitle: lyric.text);
         if (showTra) {
           _item = _item.copyWith(
             displaySubtitle: !isEmpty(lyric.translation)
@@ -302,9 +300,17 @@ Future<void> change_playback_state(
 
       return;
     }
+    if (sec != null) {
+      lastSec = sec;
+      if (showItem == null) return;
+      MediaItem _item = showItem!.copyWith(album: fSec);
+      (Get.find<AudioHandlerController>().audioHandler as AudioPlayerHandler)
+          .change_playbackstate(_item);
+      return;
+    }
     if (track == null) return;
     debugPrint('开始更新播放状态');
-    broadcastWs();
+    // broadcastWs();
     // 使用 Completer 来等待 _duration 被赋值
     final Completer<void> completer = Completer<void>();
     _playController.music_player.stream.duration.listen((duration) {
@@ -323,12 +329,14 @@ Future<void> change_playback_state(
       id: track.id,
       title: track.title!,
       artist: track.artist,
+      album: track.album,
       artUri: Uri.parse(
         track.img_url == null
             ? 'https://s.040905.xyz/d/v/business-spirit-unit.gif?sign=uDy2k6zQMaZr8CnNBem03KTPdcQGX-JVOIRcEBcVOhk=:0'
             : track.img_url!,
       ),
       duration: _duration,
+      artHeaders: kGlobalDefaultHeaders,
     );
     _currentMediaItem = _item;
     (Get.find<AudioHandlerController>().audioHandler as AudioPlayerHandler)
@@ -445,16 +453,17 @@ class _PlayState extends State<Play> {
     Widget ctx_bu = GetBuilder<AudioHandlerController>(
       builder: (controller) {
         if (controller.loading.value) {
-          return Center(child: globalLoadingAnime);
+          return Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: widget.horizon
+                  ? EdgeInsets.zero
+                  : EdgeInsets.only(bottom: max((256.w - 64) / 2, 0)),
+              child: globalLoadingAnime,
+            ),
+          );
         } else {
-          // WidgetsBinding.instance.addPostFrameCallback((_) {
-          //   Get.find<ThemeController>().didChangePlatformBrightnessOrManual(
-          //     once: true,
-          //   );
-          // });
-          Widget tW = widget.horizon
-              ? SizedBox(height: 60, child: playH())
-              : playV2;
+          Widget tW = widget.horizon ? playH().sbh(60) : playV2;
           return tW;
         }
       },
@@ -465,6 +474,34 @@ class _PlayState extends State<Play> {
 }
 
 Stream<MediaState> get _mediaStateStream => _playController.mediaState.stream;
+Stream<int> get _mediaPositionHourStream =>
+    _mediaStateStream.map((state) => state.position.inHours).distinct();
+Stream<int> get _mediaPositionMinuteStream => _mediaStateStream
+    .map((state) => state.position.inMinutes.remainder(60))
+    .distinct();
+Stream<int> get _mediaPositionSecondStream => _mediaStateStream
+    .map((state) => state.position.inSeconds.remainder(60))
+    .distinct();
+
+Stream<int> get _mediaDurationHourStream =>
+    _mediaStateStream.map((state) => state.duration.inHours).distinct();
+Stream<int> get _mediaDurationMinuteStream => _mediaStateStream
+    .map((state) => state.duration.inMinutes.remainder(60))
+    .distinct();
+Stream<int> get _mediaDurationSecondStream => _mediaStateStream
+    .map((state) => state.duration.inSeconds.remainder(60))
+    .distinct();
+
+Stream<int> get _mediaBufferHourStream =>
+    _mediaStateStream.map((state) => state.buffer.inHours).distinct();
+Stream<int> get _mediaBufferMinuteStream => _mediaStateStream
+    .map((state) => state.buffer.inMinutes.remainder(60))
+    .distinct();
+Stream<int> get _mediaBufferSecondStream => _mediaStateStream
+    .map((state) => state.buffer.inSeconds.remainder(60))
+    .distinct();
+Stream<bool> get _mediaBufferingStream =>
+    _mediaStateStream.map((state) => state.buffering).distinct();
 
 IconButton _button(
   IconData iconData,
@@ -535,8 +572,8 @@ Future<void> globalSeekToPrevious({
 Future<void> globalVolumeUp({double step = 2}) async {
   var now_pos = _playController.music_player.state.volume;
   var next_pos = now_pos + step;
-  if (next_pos > 1) {
-    next_pos = 1;
+  if (next_pos > 100) {
+    next_pos = 100;
   }
   _playController.currentVolume = next_pos;
 }
@@ -660,6 +697,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   void change_playbackstate(MediaItem _item) {
     // All options shown:
     // playbackState.add(_playbackState);
+    _currentShowMediaItem = _item;
     mediaItem.add(_item);
   }
   // In this simple example, we handle only 4 actions: play, pause, seek and
@@ -700,7 +738,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
           : AudioProcessingState.ready,
       updatePosition: _music_player.state.position,
       playing: _music_player.state.playing,
-      bufferedPosition: _music_player.state.duration,
+      bufferedPosition: _music_player.state.buffer,
     );
   }
 }

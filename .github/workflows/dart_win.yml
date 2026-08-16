@@ -23,10 +23,12 @@ jobs:
           echo "GITHASH (前7位): $GITHASH"
         shell: pwsh
       - uses: actions/checkout@v3
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: '3.35.7'
+          flutter-version: '3.38.10'
       - run: flutter --version
       - run: flutter pub get
       

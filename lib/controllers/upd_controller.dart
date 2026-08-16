@@ -1,14 +1,16 @@
 import 'dart:io';
 
 import 'package:archive/archive_io.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide CircularProgressIndicator;
 import 'package:get/get.dart';
 import 'package:install_plugin/install_plugin.dart';
+import 'package:listen1_xuan/widgets/ext/ext_widget.dart';
+import 'package:listen1_xuan/widgets/motor_progress_indicator_xuan.dart';
 import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:system_info3/system_info3.dart';
 
 import '../funcs.dart';
@@ -16,6 +18,8 @@ import '../global_settings_animations.dart';
 import '../settings.dart';
 import '../models/GitHubRelease.dart';
 import '../models/ReleaseAsset.dart';
+import '../widgets/progress_indicator_xuan.dart';
+import '../widgets/draggable_toast/draggable_toast.dart';
 import 'DioController.dart';
 import 'hyper_download_controller.dart';
 import 'routeController.dart';
@@ -488,7 +492,9 @@ class UpdController extends GetxController {
 
       // 无论是否下载，都进行解压和更新操作
       if (await File(filePath).exists()) {
-        await _performMacosExtractAndUpdate(tempPath, filePath);
+        // 先解压 canary.zip，取出内部的实际 zip 文件（如 listen1_xuan-2.5.3+45-macos-260c32f.zip）
+        final actualFilePath = await _extractInnerMacosZip(tempPath, filePath);
+        await _performMacosExtractAndUpdate(tempPath, actualFilePath);
       } else {
         showErrorSnackbar('安装包文件不存在', null);
       }
@@ -496,6 +502,47 @@ class UpdController extends GetxController {
       _closeProgressDialog();
       showErrorSnackbar('下载失败', e.toString());
     }
+  }
+
+  /// 从 artifact 的 canary.zip 中解压出实际的 macos zip 文件，
+  /// 删除原 canary.zip，并将内部文件重命名为 canary.zip
+  Future<String> _extractInnerMacosZip(String tempPath, String filePath) async {
+    final bytes = File(filePath).readAsBytesSync();
+    final archive = ZipDecoder().decodeBytes(bytes);
+
+    String? innerZipPath;
+    for (final file in archive) {
+      if (file.isFile) {
+        final filename = file.name;
+        final data = file.content as List<int>;
+        final extractPath = p.join(tempPath, filename);
+        File(extractPath)
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(data);
+
+        // 匹配类似 listen1_xuan-2.5.3+45-macos-260c32f.zip 的文件
+        if (filename.endsWith('.zip')) {
+          innerZipPath = extractPath;
+        }
+      }
+    }
+
+    if (innerZipPath == null) {
+      // 没有找到内部 zip，直接返回原文件路径
+      debugPrint('未找到内部 zip 文件，直接使用原 canary.zip');
+      return filePath;
+    }
+
+    // 删除原 canary.zip
+    await File(filePath).delete();
+    debugPrint('已删除原 canary.zip');
+
+    // 将内部 zip 重命名为 canary.zip
+    final newFilePath = p.join(tempPath, 'canary.zip');
+    await File(innerZipPath).rename(newFilePath);
+    debugPrint('已将 ${p.basename(innerZipPath)} 重命名为 canary.zip');
+
+    return newFilePath;
   }
 
   /// macOS 平台的解压和更新
@@ -574,18 +621,18 @@ class UpdController extends GetxController {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('应用将自动关闭并更新到最新版本，更新完成后会自动重启。'),
-            SizedBox(height: 12),
+            12.sbh,
             Text('注意：', style: TextStyle(fontWeight: FontWeight.bold)),
             Text(
               '1. 如果macOS阻止脚本运行，请前往 系统设置 -> 隐私与安全性 中手动允许运行更新脚本和新版本应用。',
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
-            SizedBox(height: 4),
+            4.sbh,
             Text(
               '2. 若更新脚本没有自动运行，请前往 下载/Listen1/ 文件夹手动运行 update_macos.command。',
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
-            SizedBox(height: 4),
+            4.sbh,
             Text(
               '3. 若更新脚本运行后仍无法启动应用,请手动移动并运行 下载/Listen1/canary 文件夹下的 新版应用程序',
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
@@ -793,7 +840,14 @@ class UpdController extends GetxController {
               (release) => !release.prerelease,
               orElse: () => releases.first,
             );
+
+      final rLatestRelease = releases.first;
+      final rLatestBuild = _selectReleaseAsset(rLatestRelease);
+      final rLatestBuildNumber = rLatestBuild == null
+          ? null
+          : p.basenameWithoutExtension(rLatestBuild.name).split('-').last;
       final latestBuild = _selectReleaseAsset(latestRelease);
+
       if (latestBuild == null) {
         showDebugSnackbar('未能获取最新版本的安装包信息', null);
         return;
@@ -813,7 +867,9 @@ class UpdController extends GetxController {
         await delReleasesCache(oldReleases, latestBuildNumber);
       }
 
-      if (localBuildNumber != latestBuildNumber && !kDebugMode) {
+      if (localBuildNumber != latestBuildNumber &&
+          !kDebugMode &&
+          localBuildNumber != rLatestBuildNumber) {
         // 有新版本可用
         _showReleaseUpdateDialog(latestRelease, latestBuild);
       }
@@ -833,13 +889,16 @@ class UpdController extends GetxController {
     RxString progressText = '准备下载'.obs;
 
     // 构建进度指示器 widget，支持显示百分比
-    Widget _buildProgressIcon() {
+    Widget _buildProgressIcon({bool isPeekIcon = false}) {
       return Obx(() {
         if (!isUpdating.value) {
-          return Icon(Icons.system_update_rounded);
+          return Icon(
+            Icons.system_update_rounded,
+            color: isPeekIcon ? Get.theme.colorScheme.onPrimary : null,
+          );
         }
 
-        // 从 progressText 中提取百分比
+        // 从 progressText 中提取百分比Ï
         double progress = 0.0;
         if (progressText.value.contains('%')) {
           try {
@@ -851,29 +910,32 @@ class UpdController extends GetxController {
         }
 
         return Center(
-          child: SizedBox(
-            width: 16,
-            height: 16,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                CircularProgressIndicator(
-                  strokeWidth: 2,
-                  value: progress > 0 ? progress : null,
-                  color: Get.theme.colorScheme.onPrimary,
-                ),
-              ],
-            ),
-          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              MotorCircularProgressIndicator(
+                strokeWidth: 2,
+                value: progress > 0 ? progress : null,
+                color: Get.theme.colorScheme.onPrimary,
+              ),
+            ],
+          ).sbs(16),
         );
       });
     }
 
-    smoothSheetToast.showToast(
+    draggableToastManager.show(
       inLockMode: true,
-      icon: _buildProgressIcon(),
+      icon: _buildProgressIcon(isPeekIcon: true),
+      config: DraggableToastConfig(
+        areaPadding: EdgeInsets.fromLTRB(16, 100, 16, 80),
+        snapThreshold: 60,
+        expandedWidth: 300,
+        collapsedSize: 46,
+        snapEdges: {ToastSnapEdge.left, ToastSnapEdge.right},
+      ),
       onDismiss: () {},
-      builder: (context, controller) {
+      builder: (context, state, controller) {
         return Padding(
           padding: EdgeInsets.all(8),
           child: Column(
@@ -1155,6 +1217,43 @@ class UpdController extends GetxController {
     } catch (e) {
       debugPrint('处理 Release 更新失败: $e');
       showErrorSnackbar('更新处理失败', e.toString());
+    }
+  }
+
+  /// 处理 Release 更新
+  Future<void> processFileUpdate(DropDoneDetails detail) async {
+    try {
+      if (detail.files.isEmpty) return;
+      if (detail.files.length > 1) {
+        showInfoSnackbar('请一次只拖入一个文件', null);
+        return;
+      }
+      String filePath = detail.files[0].path;
+      final basename = p.basename(filePath);
+      if (!basename.endsWith('.zip') ||
+          !basename.startsWith('windows-build-artifact')) {
+        showInfoSnackbar('拖入windows-build-artifact*.zip文件以安装更新', null);
+        return;
+      }
+      showInfoSnackbar('正在安装更新...', null);
+      if (isWindows) {
+        final downDir = (await xuanGetdownloadDirectory()).path;
+        // 移动文件到下载目录
+        final newFilePath = p.join(downDir, 'canary.zip');
+        if (filePath != newFilePath) {
+          await File(filePath).copy(newFilePath);
+          File(filePath).delete().catchError((e) {
+            showDebugSnackbar('删除原文件失败', '请手动删除 $filePath');
+          });
+          filePath = newFilePath;
+        }
+        await _performWindowsExtractAndUpdate(downDir, filePath);
+      } else {
+        showWarningSnackbar('当前平台暂不支持传入文件更新', null);
+      }
+    } catch (e) {
+      debugPrint('处理文件更新失败: $e');
+      showErrorSnackbar('处理文件更新失败', e.toString());
     }
   }
 }

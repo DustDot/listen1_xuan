@@ -1,11 +1,20 @@
+import 'package:animated_digit/animated_digit.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import 'package:heroine/heroine.dart';
 import 'package:listen1_xuan/controllers/controllers.dart';
+import 'package:listen1_xuan/controllers/receiveSharingIntentController.dart';
 import 'package:listen1_xuan/controllers/search_controller.dart';
 import 'package:listen1_xuan/funcs.dart';
 import 'package:listen1_xuan/pages/lyric/lyric_page.dart';
+import 'package:listen1_xuan/pages/playlist_info/playlist_info_page.dart';
+import 'package:listen1_xuan/pages/playlist_info/playlist_info_binding.dart';
+import 'package:listen1_xuan/pages/playlist_info/playlist_info_args.dart';
+import 'package:listen1_xuan/router/image_toolbox_predictive_transitions.dart';
+import 'package:listen1_xuan/widgets/draggable_toast/toast_overlay_manager.dart';
+import 'package:listen1_xuan/widgets/ext/ext_widget.dart';
 import 'package:media_kit/media_kit.dart' show MediaKit;
 import 'package:resizable_widget/resizable_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,12 +22,14 @@ import 'controllers/HomeController.dart';
 import 'controllers/upd_controller.dart';
 import 'examples/websocket_server_example.dart';
 import 'examples/websocket_client_example.dart';
+import 'packages/circular_theme_reveal/src/circular_theme_reveal_overlay.dart';
 import 'pages/download_page.dart';
 import 'pages/nowPlaying_page.dart';
 import 'pages/settings/settings_readme.dart';
 import 'pages/settings/settings_supabase_login_page.dart';
 import 'pages/settings/settings_supabase_password_login_page.dart';
 import 'pages/settings/cache_naming_page.dart';
+import 'pages/android_equalizer_page.dart';
 import 'pages/songReplace_page.dart';
 import 'settings.dart';
 import 'loweb.dart';
@@ -26,7 +37,7 @@ import 'bodys.dart';
 import 'play.dart';
 import 'global_settings_animations.dart';
 import 'widgets.dart';
-import 'widgets/smooth_sheet_toast.dart';
+import 'widgets/priority_responsive_action_row.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:cookie_jar/cookie_jar.dart';
@@ -47,8 +58,9 @@ import 'controllers/theme.dart';
 import 'package:app_links/app_links.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart';
-import 'package:hive/hive.dart';
 import 'package:shared_preferences/util/legacy_to_async_migration_util.dart';
+import 'package:listen1_xuan/constants/network_defaults.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 part 'main_testBtn.dart';
 part 'pages/main/main_widgets.dart';
 part 'pages/main/main_utils.dart';
@@ -62,11 +74,20 @@ int last_dir = 0;
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 class MyHttpOverrides extends HttpOverrides {
+  MyHttpOverrides({required this.trustBadCertificates, this.userAgent});
+
+  final bool trustBadCertificates;
+  final String? userAgent;
+
   @override
   HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
-      ..badCertificateCallback =
+    final client = super.createHttpClient(context);
+    client.userAgent = userAgent;
+    if (trustBadCertificates) {
+      client.badCertificateCallback =
           (X509Certificate cert, String host, int port) => true;
+    }
+    return client;
   }
 }
 
@@ -141,7 +162,9 @@ void main() async {
   );
   await settingsController.init();
   Get.put(RouteController(), permanent: true);
-  Get.put(DioController(), permanent: true);
+  DioController dioController = Get.put(DioController(), permanent: true);
+  await dioController.loadConfig();
+  settingsController.completeDioInit();
   CacheController cacheController = Get.put(CacheController(), permanent: true);
   Get.put(PlayController(), permanent: true);
   cacheController.loadLocalCacheList();
@@ -159,8 +182,10 @@ void main() async {
   Get.put(XSearchController(), permanent: true);
   Get.put(UpdController(), permanent: true);
   Get.put(HomeController(), permanent: true);
+  Get.put(PasteController(), permanent: true);
+  if (isAndroid) Get.put(ReceiveSharingIntentController(), permanent: true);
   init_apkfilepath();
-  if (isWindows || isMacOS) {
+  if (isDesktop) {
     if (isWindows) {
       SMTCWindows.initialize();
     }
@@ -218,7 +243,7 @@ void main() async {
   // 如果设置了自动连接，则连接WebSocket服务器
   wsClientController.autoConnectIfNeeded();
 
-  Map<String, dynamic> settings = settings_getsettings();
+  Map<String, dynamic> settings = lengcyGetSettings();
   bool useHttpOverrides = false;
   if (settings["useHttpOverrides"] == null) {
     settings["useHttpOverrides"] = false;
@@ -226,10 +251,11 @@ void main() async {
   } else {
     useHttpOverrides = settings["useHttpOverrides"];
   }
-  // 根据设置的值决定是否运行 HttpOverrides.global = MyHttpOverrides();
-  if (useHttpOverrides) {
-    HttpOverrides.global = MyHttpOverrides();
-  }
+  // Always set global UA; certificate bypass remains controlled by settings.
+  HttpOverrides.global = MyHttpOverrides(
+    trustBadCertificates: useHttpOverrides,
+    userAgent: kGlobalDefaultUserAgent,
+  );
 
   final appDocDir = await getApplicationDocumentsDirectory();
   final _cookiePath = cookiePath(appDocDir);
@@ -290,6 +316,9 @@ class MyApp extends StatelessWidget {
           builder: (theme, darkTheme) => GetMaterialApp(
             title: 'Listen1',
             builder: (context, widget) {
+              widget = CircularThemeRevealOverlay(
+                child: widget ?? SizedBox.shrink(),
+              );
               widget = FToastBuilder()(context, widget);
               // 处理 MediaQuery 异常问题，特别是小米澎湃系统
               MediaQueryData mediaQuery = MediaQuery.of(context);
@@ -297,7 +326,7 @@ class MyApp extends StatelessWidget {
 
               // 如果出现异常值，使用默认值替代
               if (safeTop > 80 || safeTop < 0) {
-                print(
+                debugPrint(
                   'Detected abnormal top padding: $safeTop, using fallback.',
                 );
                 safeTop = 24.0; // 合理默认值
@@ -315,18 +344,12 @@ class MyApp extends StatelessWidget {
               );
             },
             navigatorKey: navigatorKey,
-            theme: theme,
-            //TODO 预测性返回功能待完善
-
-            // .copyWith(
-            //   pageTransitionsTheme: const PageTransitionsTheme(
-            //     builders: <TargetPlatform, PageTransitionsBuilder>{
-            //       TargetPlatform.android:
-            //           PredictiveBackPageTransitionsBuilder(),
-            //     },
-            //   ),
-            // )
-            darkTheme: darkTheme,
+            theme: theme.copyWith(
+              pageTransitionsTheme: imageToolboxPageTransitionsTheme,
+            ),
+            darkTheme: darkTheme.copyWith(
+              pageTransitionsTheme: imageToolboxPageTransitionsTheme,
+            ),
             localizationsDelegates: [
               GlobalMaterialLocalizations.delegate,
               GlobalWidgetsLocalizations.delegate,
@@ -359,8 +382,6 @@ class MyHomePage extends StatefulWidget {
   _MyHomePageState createState() => _MyHomePageState();
 }
 
-var main_showVolumeSlider;
-
 late bool globalHorizon;
 final List<String> platforms = ['我的', 'BiliBili', '网易云', 'QQ', '酷狗'];
 
@@ -373,18 +394,14 @@ class _MyHomePageState extends State<MyHomePage>
     with TrayListener, WindowListener, WidgetsBindingObserver {
   FocusNode _focusNode = FocusNode();
   FocusNode _focusNode2 = FocusNode();
-  PlayController _playController = Get.find<PlayController>();
-  OverlayEntry? _overlayEntry;
-  Timer? _timer;
-  bool volumeSliderVisible = false;
+
   @override
   void initState() {
     super.initState();
     if (isDesktop) WidgetsBinding.instance.addObserver(this);
     trayManager.addListener(this);
     homeController.updatePageControllers();
-    main_showVolumeSlider = showVolumeSlider;
-    if (isWindows || isMacOS) {
+    if (isDesktop) {
       _initTrayManager();
       init_hotkeys();
       windowManager.addListener(this);
@@ -396,13 +413,14 @@ class _MyHomePageState extends State<MyHomePage>
     // if you want to use context from globally instead of content we need to pass navigatorKey.currentContext!
     fToast.init(navigatorKey.currentContext!);
 
-    smoothSheetToast = SmoothSheetToast();
-    smoothSheetToast.init(navigatorKey.currentContext!);
+    draggableToastManager = ToastOverlayManager.instance;
+    draggableToastManager.init(navigatorKey.currentContext!);
   }
 
   @override
-  void onWindowClose() {
-    closeApp();
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    Get.find<ThemeController>().stateAppLifecycleStateResumed.value =
+        state == AppLifecycleState.resumed;
   }
 
   void _initTrayManager() async {
@@ -431,7 +449,6 @@ class _MyHomePageState extends State<MyHomePage>
     await windowManager.setAlwaysOnTop(true);
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setBackgroundColor(Colors.transparent);
-    // await
     createThemeController().didChangePlatformBrightnessOrManual();
   }
 
@@ -457,11 +474,15 @@ class _MyHomePageState extends State<MyHomePage>
     for (var i = 1; i < HomeController.sources.length; i++) {
       var t = await MediaService.getPlaylistFilters(HomeController.sources[i]);
       t["success"]((data) {
-        debugPrint(HomeController.sources[i]);
-        debugPrint(data.toString());
+        logger.t('获取歌单过滤器成功: ${HomeController.sources[i]}$data');
         homeController.filter_details[i] = data;
       });
     }
+  }
+
+  @override
+  void onWindowClose() {
+    _clickCloseBtn();
   }
 
   @override
@@ -478,13 +499,10 @@ class _MyHomePageState extends State<MyHomePage>
       windowManager.removeListener(this);
     }
     _focusNode.dispose();
-    _timer?.cancel();
     _focusNode2.dispose();
     homeController.pageControllerHorizon.dispose(); // 销毁 PageController
     homeController.pageControllerPortrait.dispose();
-    try {} catch (e) {
-      // print(e);
-    }
+
     super.dispose();
   }
 
@@ -505,6 +523,12 @@ class _MyHomePageState extends State<MyHomePage>
         if (!enable_inapp_hotkey) {
           return KeyEventResult.ignored; // 将按键事件传递给下一个处理器
         }
+        // 处理粘贴快捷键 (仅Desktop)
+        if (isDesktop &&
+            Get.isRegistered<PasteController>() &&
+            Get.find<PasteController>().handleKeyEvent(event)) {
+          return KeyEventResult.handled;
+        }
 
         bool flag = false;
         if (event is KeyDownEvent || event is KeyRepeatEvent) {
@@ -518,132 +542,144 @@ class _MyHomePageState extends State<MyHomePage>
         if (flag) return KeyEventResult.handled;
         return KeyEventResult.ignored;
       },
-      child: OrientationBuilder(
-        builder: (context, orientation) {
-          globalHorizon = orientation == Orientation.landscape;
-          if (globalHorizon) {
-            homeController.selectedIndex.value = 2;
-            debugPrint('当前为横屏模式');
-            SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      child: DropTarget(
+        enable: isWindows,
+        onDragDone: (detail) =>
+            Get.find<UpdController>().processFileUpdate(detail),
 
-            homeController.show_filter.value = true;
-          } else {
-            homeController.selectedIndex.value = 0;
-            debugPrint('当前为竖屏模式');
-            SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-          }
-          homeController.source.value =
-              HomeController.sources[homeController.selectedIndex.value];
-          bool flag = false;
-          if (orientation == Orientation.portrait) {
-            // 竖屏逻辑
-            if (last_dir == 2) {
-              flag = true;
+        onDragEntered: (detail) {
+          showInfoSnackbar('松开以确认', null);
+        },
+        child: OrientationBuilder(
+          builder: (context, orientation) {
+            globalHorizon = orientation == Orientation.landscape;
+            if (globalHorizon) {
+              homeController.selectedIndex.value = 2;
+              debugPrint('当前为横屏模式');
+              SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
+              homeController.show_filter.value = true;
+            } else {
+              homeController.selectedIndex.value = 0;
+              if (!Get.find<XSearchController>().showSearchArea.value) {
+                Get.find<XSearchController>().showSearchArea.value = true;
+              }
+              debugPrint('当前为竖屏模式');
+              SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
             }
-            last_dir = 1;
-          } else {
-            // 横屏逻辑
-            if (last_dir == 1) {
-              flag = true;
+            homeController.source.value =
+                HomeController.sources[homeController.selectedIndex.value];
+            bool flag = false;
+            if (orientation == Orientation.portrait) {
+              // 竖屏逻辑
+              if (last_dir == 2) {
+                flag = true;
+              }
+              last_dir = 1;
+            } else {
+              // 横屏逻辑
+              if (last_dir == 1) {
+                flag = true;
+              }
+              last_dir = 2;
             }
-            last_dir = 2;
-          }
-          if (flag) {
-            Get.offAllNamed('/', id: 1);
-            homeController.updatePageControllers();
-          }
-          Widget _play = Play(horizon: globalHorizon);
-          Scaffold con() => Scaffold(
-            extendBody: true,
-            backgroundColor: createThemeController().playHBackgroundColor.value,
-            body: Stack(
-              children: [
-                Positioned.fill(
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: globalHorizon
-                            ? ResizableWidget(
-                                isHorizontalSeparator: false,
-                                isDisabledSmartHide: false,
-                                separatorColor: AdaptiveTheme.of(
-                                  Get.context!,
-                                ).theme.colorScheme.secondaryContainer,
-                                separatorSize: 2,
-                                percentages: horPartPercentages,
-                                minWidths: [180, 500],
-                                onResized: (infoList) {
-                                  Get.find<SettingsController>()
-                                      .horPartPercentages = infoList
-                                      .map((e) => e.percentage)
-                                      .toList();
-                                },
-                                children: [
-                                  // required
-                                  isWindows || isMacOS
-                                      ? DragToMoveArea(child: _leftBar)
-                                      : _leftBar,
-
-                                  _mainContent(),
-                                ],
-                              )
-                            : _mainContent(),
-                      ),
-                      if (!globalHorizon)
-                        SafeArea(top: false, child: SizedBox(height: 256.w))
-                      else
-                        SizedBox(height: 60),
-                    ],
-                  ),
-                ),
-
-                ///测试按钮
-                if (kDebugMode) testBtn,
-
-                ///WebSocketClientControlPanel悬浮按钮
-                Positioned.fill(
-                  child: SafeArea(
-                    top: false,
-                    child: Align(
-                      alignment: Alignment.bottomRight,
-                      child: Padding(
-                        padding: EdgeInsets.only(
-                          bottom: globalHorizon ? 76 : 300.w,
-                          right: globalHorizon ? 16 : 40.w,
+            if (flag) {
+              Get.offAllNamed('/', id: 1);
+              homeController.updatePageControllers();
+            }
+            Widget _play = Play(horizon: globalHorizon);
+            Scaffold con() => Scaffold(
+              extendBody: true,
+              backgroundColor:
+                  createThemeController().playHBackgroundColor.value,
+              body: Stack(
+                children: [
+                  Positioned.fill(
+                    child: Column(
+                      children: <Widget>[
+                        Expanded(
+                          child: globalHorizon
+                              ? ResizableWidget(
+                                  isHorizontalSeparator: false,
+                                  isDisabledSmartHide: false,
+                                  separatorColor: AdaptiveTheme.of(
+                                    Get.context!,
+                                  ).theme.colorScheme.secondaryContainer,
+                                  separatorSize: 2,
+                                  percentages: horPartPercentages,
+                                  minWidths: [60, 500],
+                                  keepWidthWhenExtended: {0},
+                                  onResized: (infoList) {
+                                    Get.find<SettingsController>()
+                                        .horPartPercentages = infoList
+                                        .map((e) => e.percentage)
+                                        .toList();
+                                  },
+                                  children: [
+                                    // required
+                                    isWindows || isMacOS
+                                        ? DragToMoveArea(child: _leftBar)
+                                        : _leftBar,
+                                    _mainContent(),
+                                  ],
+                                )
+                              : _mainContent(),
                         ),
-                        child: WebSocketClientControlPanel.floatingActionButton,
+                        if (!globalHorizon)
+                          SafeArea(top: false, child: 256.wsbh)
+                        else
+                          60.sbh,
+                      ],
+                    ),
+                  ),
+
+                  ///测试按钮
+                  if (kDebugMode && !testBtnoff) testBtn,
+
+                  ///WebSocketClientControlPanel悬浮按钮
+                  Positioned.fill(
+                    child: SafeArea(
+                      top: false,
+                      child: Align(
+                        alignment: Alignment.bottomRight,
+                        child: Padding(
+                          padding: EdgeInsets.only(
+                            bottom: globalHorizon ? 76 : 300.w,
+                            right: globalHorizon ? 16 : 40.w,
+                          ),
+                          child:
+                              WebSocketClientControlPanel.floatingActionButton,
+                        ),
                       ),
                     ),
                   ),
-                ),
 
-                /// 播放控制栏
-                Positioned.fill(
-                  child: globalHorizon
-                      ? Align(alignment: Alignment.bottomCenter, child: _play)
-                      : SafeArea(top: false, child: _play),
+                  /// 播放控制栏
+                  Positioned.fill(
+                    child: globalHorizon
+                        ? Align(alignment: Alignment.bottomCenter, child: _play)
+                        : SafeArea(top: false, child: _play),
 
-                  // 竖屏状态下添加额外的占位空间
-                ),
-              ],
-            ),
-            // floatingActionButton:
-            // FloatingActionButton(
-            //   onPressed: () {
-            //     Get.find<Applinkscontroller>().processAppLink();
-            //   },
-            // ),
-            // WebSocketClientControlPanel.floatingActionButton,
-          );
+                    // 竖屏状态下添加额外的占位空间
+                  ),
+                ],
+              ),
+              // floatingActionButton:
+              // FloatingActionButton(
+              //   onPressed: () {
+              //     Get.find<Applinkscontroller>().processAppLink();
+              //   },
+              // ),
+              // WebSocketClientControlPanel.floatingActionButton,
+            );
 
-          return PopScope(
-            canPop: false,
-            onPopInvokedWithResult: (didPop, result) {
-              router_pop();
-            },
-            child: isDesktop && globalHorizon ? Obx(() => con()) : con(),
-          );
-        },
+            return PopScope(
+              canPop: false,
+              onPopInvokedWithResult: (didPop, result) => routerPop(),
+              child: isDesktop && globalHorizon ? Obx(() => con()) : con(),
+            );
+          },
+        ),
       ),
     );
   }
@@ -678,78 +714,5 @@ class _MyHomePageState extends State<MyHomePage>
   @override
   void onWindowUnmaximize() {
     Get.find<SettingsController>().onWindowUnmaximize();
-  }
-
-  void showVolumeSlider() async {
-    if (volumeSliderVisible) {
-      _overlayEntry?.remove();
-      _overlayEntry = null;
-      volumeSliderVisible = false;
-      return;
-    }
-    volumeSliderVisible = true;
-    _overlayEntry?.remove();
-    _overlayEntry = null;
-    _overlayEntry = _createOverlayEntry();
-    Overlay.of(homeController.main_context).insert(_overlayEntry!);
-    _startAutoCloseTimer();
-  }
-
-  void _startAutoCloseTimer() {
-    _timer?.cancel();
-    _timer = Timer(Duration(seconds: 3), () {
-      _overlayEntry?.remove();
-      _overlayEntry = null;
-      volumeSliderVisible = false;
-    });
-  }
-
-  OverlayEntry _createOverlayEntry() {
-    return OverlayEntry(
-      builder: (context) => Positioned(
-        top: MediaQuery.of(context).size.height / 2 - 100,
-        right: 0,
-        child: Material(
-          color: Colors.transparent,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              _overlayEntry?.remove();
-              _overlayEntry = null;
-              volumeSliderVisible = false;
-            },
-            child: Container(
-              height: 200,
-              width: 40,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface, // 使用当前主题的表面颜色
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color.fromARGB(113, 120, 120, 120),
-                    blurRadius: 10,
-                    offset: Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: RotatedBox(
-                quarterTurns: -1,
-                child: Obx(
-                  () => Slider(
-                    min: 0.0,
-                    max: 100.0,
-                    value: _playController.currentVolume,
-                    onChanged: (value) {
-                      _playController.currentVolume = value;
-                      _startAutoCloseTimer();
-                    },
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }

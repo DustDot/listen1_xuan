@@ -31,6 +31,9 @@ class SearchPlayListItem {
   /// 歌曲数量
   int? count;
 
+  /// 总时长,哔哩哔哩实现@https://github.com/Gitkila
+  String? totalDurMsg;
+
   SearchPlayListItem({
     this.id,
     this.title,
@@ -40,6 +43,7 @@ class SearchPlayListItem {
     this.url,
     this.author,
     this.count,
+    this.totalDurMsg,
   });
 
   factory SearchPlayListItem.fromJson(Map<String, dynamic> json) =>
@@ -57,14 +61,11 @@ class SearchPlayListRes {
   /// 总数
   final int total;
 
-  /// 搜索类型（'0': 歌曲, '1': 歌单）
-  final String type;
+  final String? error;
 
-  SearchPlayListRes({
-    required this.result,
-    required this.total,
-    required this.type,
-  });
+  bool get hasError => error != null;
+
+  SearchPlayListRes({required this.result, required this.total, this.error});
 
   factory SearchPlayListRes.fromJson(Map<String, dynamic> json) =>
       _$SearchPlayListResFromJson(json);

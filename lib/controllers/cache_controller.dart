@@ -1,14 +1,19 @@
+import 'dart:math';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
+import 'package:listen1_xuan/controllers/lyric_controller.dart';
 import 'package:listen1_xuan/funcs.dart';
+import 'package:listen1_xuan/models/OnlineCacheItem.dart';
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import 'dart:convert';
-import '../const.dart';
+import '../constants/const.dart';
+import '../constants/network_defaults.dart';
 import '../global_settings_animations.dart';
 import '../main.dart';
 import 'DioController.dart';
@@ -23,6 +28,7 @@ class CacheController extends GetxController {
   final Logger _logger = Logger();
   final String _localCacheListKey = 'local-cache-list';
   final _localCacheList = <String, String>{}.obs;
+  final _onlineCacheList = <String, OnlineCacheItem>{}.obs;
   final _toDelFiles = <String>{}.obs;
   SettingsController _settingsController = Get.find<SettingsController>();
   PlayController get _playController => Get.find<PlayController>();
@@ -83,53 +89,97 @@ class CacheController extends GetxController {
     Track track, {
     Track? sTrack,
   }) async {
+    _onlineCacheList[track.id] = OnlineCacheItem(
+      url: res['url'],
+      audioQualityOfBL: res['audioQualityOfBL'],
+    );
+    if (_settingsController.disableSongDownload) return;
+
+    if (_playController.bootStrapDownloading.containsKey(
+      sTrack?.id ?? track.id,
+    ))
+      return;
+
     final downDir = await xuanGetdownloadDirectory();
     String downPath = downDir.path;
     String fileName = getDownloadNamed(track, res['url']);
     final filePath = p.join(downPath, fileName);
-    _playController.bootStraping[sTrack?.id ?? track.id] = fileName;
+    _playController.bootStrapDownloading[sTrack?.id ?? track.id] = fileName;
     void onReceiveProgress(int count, int total) {
-      if (_playController.bootStraping.containsKey(sTrack?.id ?? track.id)) {
-        _playController.bootStraping[sTrack?.id ?? track.id] =
+      if (_playController.bootStrapDownloading.containsKey(
+        sTrack?.id ?? track.id,
+      )) {
+        _playController.bootStrapDownloading[sTrack?.id ?? track.id] =
             '${formatBytes(count)}/${formatBytes(total)}';
       }
     }
 
+    void onSuccess(res) {
+      showDebugSnackbar('$fileName 下载完成', null);
+      setLocalCache(track.id, fileName);
+    }
+
+    void onError(e) async {
+      _logger.e('下载文件失败: $e');
+      _playController.bootStrapDownloading.remove(sTrack?.id ?? track.id);
+      showErrorSnackbar('下载文件失败', e.toString());
+    }
+
     switch (res["platform"]) {
       case "bilibili":
-        await dioWithCookieManager.download(
-          res['url'],
-          filePath,
-          options: Options(
-            headers: {
-              "user-agent":
-                  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.119 Safari/537.36",
-              "accept": "*/*",
-              "accept-encoding": "identity;q=1, *;q=0",
-              "accept-language": "zh-CN",
-              "referer": "https://www.bilibili.com/",
-              "sec-fetch-dest": "audio",
-              "sec-fetch-mode": "no-cors",
-              "sec-fetch-site": "cross-site",
-              "range": "bytes=0-",
-            },
-          ),
-          onReceiveProgress: onReceiveProgress,
-        );
+        dioWithCookieManager
+            .download(
+              res['url'],
+              filePath,
+              options: Options(
+                headers: {
+                  "user-agent":
+                      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.119 Safari/537.36",
+                  "accept": "*/*",
+                  "accept-encoding": "identity;q=1, *;q=0",
+                  "accept-language": "zh-CN",
+                  "referer": "https://www.bilibili.com/",
+                  "sec-fetch-dest": "audio",
+                  "sec-fetch-mode": "no-cors",
+                  "sec-fetch-site": "cross-site",
+                  "range": "bytes=0-",
+                },
+              ),
+              onReceiveProgress: onReceiveProgress,
+            )
+            .then((value) {
+              onSuccess(value);
+            })
+            .catchError((e) {
+              onError(e);
+            });
       case "netease":
-        await dioWithCookieManager.download(
-          res['url'],
-          onReceiveProgress: onReceiveProgress,
-          filePath,
-        );
+        dioWithCookieManager
+            .download(
+              res['url'],
+              onReceiveProgress: onReceiveProgress,
+              filePath,
+            )
+            .then((value) {
+              onSuccess(value);
+            })
+            .catchError((e) {
+              onError(e);
+            });
       default:
-        await dioWithCookieManager.download(
-          res['url'],
-          onReceiveProgress: onReceiveProgress,
-          filePath,
-        );
+        dioWithCookieManager
+            .download(
+              res['url'],
+              onReceiveProgress: onReceiveProgress,
+              filePath,
+            )
+            .then((value) {
+              onSuccess(value);
+            })
+            .catchError((e) {
+              onError(e);
+            });
     }
-    setLocalCache(track.id, fileName);
   }
 
   String getDownloadNamed(Track track, String url) {
@@ -187,7 +237,7 @@ class CacheController extends GetxController {
     String ext = extension(Uri.parse(url).pathSegments.last);
     // 处理重名
     Set<String> existingFileNames = _localCacheList.values.toSet().union(
-      Get.find<PlayController>().bootStraping.values.toSet(),
+      Get.find<PlayController>().bootStrapDownloading.values.toSet(),
     );
 
     // 检查不带后缀的情况下是否有重名
@@ -233,10 +283,25 @@ class CacheController extends GetxController {
     _isDeleting = false;
   }
 
+  bool isOnlineCache(String id) {
+    return _onlineCacheList.containsKey(id);
+  }
+
+  Map<String, String>? httpHeadersOfOnlineCache(String id) {
+    id = _playController.songReplaceSettings.value.getReplacementId(id) ?? id;
+    if (isOnlineCache(id) && id.startsWith('bi')) {
+      return kBilibiliPlayHeader;
+    }
+    return null;
+  }
+
   /// 获取本地缓存文件路径
   Future<String> getLocalCache(String id) async {
     if (!_isDeleting) tryDelFiles(); // 尝试删除待删除的文件
     id = _playController.songReplaceSettings.value.getReplacementId(id) ?? id;
+    if (_onlineCacheList.containsKey(id)) {
+      return _onlineCacheList[id]!.url;
+    }
     if (_localCacheList.containsKey(id)) {
       var downDir = await xuanGetdataDirectory();
 
@@ -249,15 +314,29 @@ class CacheController extends GetxController {
     return '';
   }
 
+  OnlineCacheItem? getLocalCacheOnlineCacheItem(String id) {
+    id = _playController.songReplaceSettings.value.getReplacementId(id) ?? id;
+    if (_onlineCacheList.containsKey(id)) {
+      return _onlineCacheList[id]!;
+    }
+    return null;
+  }
+
   // 设置本地缓存文件路径
   void setLocalCache(String id, String fileName) async {
+    _onlineCacheList.remove(id);
     _localCacheList[id] = fileName;
+    _playController.bootStrapDownloading.remove(id);
   }
 
   /// 清理本地缓存
-  Future<void> cleanLocalCache([bool all = false, String id = '']) async {
+  Future<void> cleanLocalCache([
+    bool all = false,
+    String id = '',
+    bool hideSnackbar = false,
+  ]) async {
     if (id.isNotEmpty) {
-      await _cleanSingleCache(id);
+      await _cleanSingleCache(id, hideSnackbar: hideSnackbar);
       return;
     }
 
@@ -268,16 +347,34 @@ class CacheController extends GetxController {
     }
   }
 
+  void testSetErrorAddr() {
+    _onlineCacheList[_playController.currentTrack.id] = OnlineCacheItem(
+      url: 'http://example.com/nonexistentfile.mp3',
+    );
+  }
+
   /// 清理单个缓存文件
-  Future<void> _cleanSingleCache(String id) async {
+  Future<void> _cleanSingleCache(String id, {bool hideSnackbar = false}) async {
+    if (_playController.bootStrapDownloading.containsKey(id)) {
+      showWarningSnackbar('正在下载中，无法清理', null);
+      return;
+    }
+    Get.find<XLyricController>().clearLyricCache(id);
     id = _playController.songReplaceSettings.value.getReplacementId(id) ?? id;
     final path = await getLocalCache(id);
+    if (isOnlineCache(id)) {
+      _onlineCacheList.remove(id);
+      if (!hideSnackbar) showInfoSnackbar('已清理在线缓存', null);
+      return;
+    }
     if (path.isNotEmpty) {
       try {
         await File(path).delete();
         _localCacheList.remove(id);
 
-        showInfoSnackbar('已清理', null);
+        if (!hideSnackbar) {
+          showInfoSnackbar('已清理', null);
+        }
       } catch (e) {
         showErrorSnackbar('清理失败', e.toString());
       }
@@ -345,7 +442,7 @@ class CacheController extends GetxController {
         }
       }
     }
-
+    Get.find<XLyricController>().clearLyricBoxExceptIds(notToDelIds);
     // 清理无效的缓存记录（文件已不存在）
     await _cleanInvalidCacheRecords();
 
