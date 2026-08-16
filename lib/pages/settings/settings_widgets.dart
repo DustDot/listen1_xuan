@@ -590,6 +590,16 @@ List<Widget> get cacheSettingsTiles => [
       },
     ),
   ),
+  Obx(
+    () => SwitchListTile(
+      title: const Text('缓存保留元数据'),
+      subtitle: const Text('开启后将写入歌曲信息'),
+      value: Get.find<SettingsController>().cacheRetainMetadata,
+      onChanged: (bool value) {
+        Get.find<SettingsController>().cacheRetainMetadata = value;
+      },
+    ),
+  ),
   ListTile(
     leading: Icon(Icons.edit),
     title: const Text('缓存命名方式'),
@@ -615,7 +625,87 @@ List<Widget> get cacheSettingsTiles => [
     trailing: Icon(Icons.chevron_right),
     onTap: () => Get.toNamed(RouteName.cacheNamingPage, id: 1),
   ),
+  const _CacheDirectoryTile(),
 ].map((e) => Padding(padding: EdgeInsets.all(8.0), child: e)).toList();
+
+class _CacheDirectoryTile extends StatefulWidget {
+  const _CacheDirectoryTile();
+
+  @override
+  State<_CacheDirectoryTile> createState() => _CacheDirectoryTileState();
+}
+
+class _CacheDirectoryTileState extends State<_CacheDirectoryTile> {
+  late final Future<Directory> _defaultDirectory;
+  bool _isChanging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _defaultDirectory = xuanGetDefaultCacheDirectory();
+  }
+
+  Future<void> _selectDirectory() async {
+    final currentDirectory = await xuanGetdataDirectory();
+    final selectedPath = await FilePicker.getDirectoryPath(
+      dialogTitle: '选择缓存目录',
+      initialDirectory: currentDirectory.path,
+    );
+    if (selectedPath == null || selectedPath.trim().isEmpty) return;
+    await _changeDirectory(selectedPath);
+  }
+
+  Future<void> _changeDirectory(String? path) async {
+    if (_isChanging) return;
+    setState(() => _isChanging = true);
+    try {
+      final directory = await Get.find<CacheController>().changeCacheDirectory(
+        path,
+      );
+      if (!mounted) return;
+      showSuccessSnackbar('缓存路径已设置', directory.path);
+    } catch (e) {
+      if (!mounted) return;
+      showErrorSnackbar('设置缓存路径失败', e.toString());
+    } finally {
+      if (mounted) setState(() => _isChanging = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settingsController = Get.find<SettingsController>();
+    return Obx(() {
+      final customPath = settingsController.cacheDirectoryPath;
+      return FutureBuilder<Directory>(
+        future: _defaultDirectory,
+        builder: (context, snapshot) {
+          final path = customPath.isNotEmpty
+              ? customPath
+              : snapshot.data?.path ?? '正在获取默认路径...';
+          return ListTile(
+            leading: const Icon(Icons.folder_outlined),
+            title: const Text('设置缓存路径'),
+            subtitle: Text(path, maxLines: 2, overflow: TextOverflow.ellipsis),
+            onTap: _isChanging ? null : _selectDirectory,
+            trailing: _isChanging
+                ? const SizedBox.square(
+                    dimension: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : customPath.isEmpty
+                ? const Icon(Icons.chevron_right)
+                : IconButton(
+                    tooltip: '恢复默认路径',
+                    onPressed: () => _changeDirectory(null),
+                    icon: const Icon(Icons.restore),
+                  ),
+          );
+        },
+      );
+    });
+  }
+}
 
 Widget desktopSettingsTiles(
   BuildContext context,
