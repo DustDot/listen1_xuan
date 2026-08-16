@@ -4,21 +4,39 @@ on:
   push:
     branches: ["main"]
     paths:
-      # - "**/*.dart"
-      # - "pubspec.yaml"
-      - "**/dart_test.yml"
+      - "**/*.dart"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - ".github/workflows/dart_test.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "**/*.dart"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - ".github/workflows/dart_test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    if: "contains(github.event.head_commit.message, 'test')"
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Output Commit Information
         run: |
           echo "触发此次action的提交ID: ${{ github.sha }}"
-          echo "提交信息: ${{ github.event.head_commit.message }}"
-          echo "提交作者: ${{ github.event.head_commit.author.name }}"
           GITHASH=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "GITHASH=$GITHASH" >> $GITHUB_ENV
           echo "GITHASH (前7位): $GITHASH"
-      
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          flutter-version: "3.38.10"
+
+      - run: flutter pub get
+      - run: flutter test
