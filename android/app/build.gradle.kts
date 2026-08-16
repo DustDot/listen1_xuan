@@ -16,7 +16,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 val storeFileVal = file(
-    System.getenv("KEYSTORE") ?: keystoreProperties.getProperty("storeFile") ?: "xuan.jks"
+    System.getenv("KEYSTORE") ?: keystoreProperties.getProperty("storeFile") ?: "release.keystore"
 )
 val storePasswordVal = System.getenv("KEYSTORE_PASSWORD") ?: keystoreProperties.getProperty("storePassword")
 val keyAliasVal = System.getenv("KEY_ALIAS") ?: keystoreProperties.getProperty("keyAlias")

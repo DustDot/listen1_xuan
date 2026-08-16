@@ -44,11 +44,61 @@ jobs:
       - run: flutter --version
       - run: flutter pub get 
 
-      - name: 解码生成 jks
-        run: echo $KEYSTORE_BASE64 | base64 -di > android/app/xuan.jks
+      - name: Restore and validate Android keystore
+        shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-      # - run: cat android/app/xuan.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing GitHub Actions secrets: ${missing[*]}"
+            echo "::error::Add the Android signing secrets under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          keystore_path="android/app/release.keystore"
+          if ! printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > "$keystore_path"; then
+            rm -f "$keystore_path"
+            echo "::error::KEYSTORE_BASE64 is not valid Base64. Encode the raw keystore file without PEM headers."
+            exit 1
+          fi
+
+          if [[ ! -s "$keystore_path" ]]; then
+            echo "::error::The decoded Android keystore is empty."
+            exit 1
+          fi
+
+          if ! keytool -list \
+            -keystore "$keystore_path" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::Unable to open the Android keystore. Check KEYSTORE_BASE64, KEYSTORE_PASSWORD, and KEY_ALIAS."
+            exit 1
+          fi
+
+          check_dir="$(mktemp -d)"
+          trap 'rm -rf "$check_dir"' EXIT
+          printf 'keystore validation' > "$check_dir/payload.txt"
+          jar --create --file "$check_dir/check.jar" -C "$check_dir" payload.txt
+          if ! jarsigner \
+            -keystore "$keystore_path" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            "$check_dir/check.jar" "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::Unable to sign with the configured key. Check KEY_ALIAS and KEY_PASSWORD."
+            exit 1
+          fi
 
       - name: flutter build apk --split-per-abi
         run: flutter build apk --release --split-per-abi --dart-define=gitHash=${{ env.GITHASH }}
