@@ -38,6 +38,12 @@ fail() {
 
 sign_frameworks() {
   local BASE="$1"
+
+  # The upstream zip contains AppleDouble sidecar files (._Resources,
+  # ._Headers, etc.). They are not framework resources and make codesign reject
+  # the bundle with "unsealed contents present in the root directory".
+  find "$BASE" -type f \( -name '._*' -o -name '.DS_Store' \) -delete
+
   for FW in $FRAMEWORKS; do
     local PATH_TO_FRAMEWORK="${BASE}/${FW}.framework"
     [ -d "$PATH_TO_FRAMEWORK" ] || return 1
