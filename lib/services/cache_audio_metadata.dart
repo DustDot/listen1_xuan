@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:ffmpeg_kit_flutter_new_audio/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_audio/ffmpeg_session.dart';
+import 'package:ffmpeg_kit_flutter_new_audio/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_audio/return_code.dart';
 import 'package:path/path.dart' as p;
 
@@ -29,6 +31,7 @@ class CacheAudioMetadata {
     required String outputPath,
     required bool retainMetadata,
     CacheTrackMetadata? metadata,
+    String? coverPath,
   }) async {
     final session = await _execute(
       buildArguments(
@@ -36,10 +39,14 @@ class CacheAudioMetadata {
         outputPath: outputPath,
         retainMetadata: retainMetadata,
         metadata: metadata,
+        coverPath: coverPath,
       ),
     );
     final returnCode = await session.getReturnCode();
-    if (ReturnCode.isSuccess(returnCode)) return;
+    if (ReturnCode.isSuccess(returnCode)) {
+      await validateAudioOutput(outputPath);
+      return;
+    }
 
     final output = await session.getOutput();
     throw CacheAudioMetadataException(_errorMessage(output));
@@ -50,7 +57,15 @@ class CacheAudioMetadata {
     required String outputPath,
     required bool retainMetadata,
     CacheTrackMetadata? metadata,
+    String? coverPath,
   }) {
+    final embedNewCover = shouldEmbedCover(
+      retainMetadata: retainMetadata,
+      outputPath: outputPath,
+      coverPath: coverPath,
+    );
+    final preserveSourceCover =
+        retainMetadata && !embedNewCover && supportsEmbeddedCover(outputPath);
     final arguments = <String>[
       '-hide_banner',
       '-nostdin',
@@ -58,10 +73,15 @@ class CacheAudioMetadata {
       'warning',
       '-i',
       inputPath,
+      if (embedNewCover) ...['-i', coverPath!],
       '-map',
       '0:a:0',
+      if (embedNewCover) ...['-map', '1:v:0'],
+      if (preserveSourceCover) ...['-map', '0:v:0?'],
       '-c:a',
       'copy',
+      if (embedNewCover) ...coverOutputArguments(),
+      if (preserveSourceCover) ...['-c:v', 'copy'],
       ...outputMetadataArguments(
         retainMetadata: retainMetadata,
         metadata: metadata,
@@ -83,10 +103,14 @@ class CacheAudioMetadata {
   }) {
     final arguments = <String>[];
     if (retainMetadata) {
-      _addMetadata(arguments, 'title', metadata?.title);
-      _addMetadata(arguments, 'artist', metadata?.artist);
-      _addMetadata(arguments, 'album', metadata?.album);
-      _addMetadata(arguments, 'album_artist', metadata?.albumArtist);
+      arguments.addAll([
+        '-map_metadata',
+        '0',
+        '-map_metadata:s:a:0',
+        '0:s:a:0',
+      ]);
+      _addTrackMetadata(arguments, metadata, specifier: 'g');
+      _addTrackMetadata(arguments, metadata, specifier: 's:a:0');
     } else {
       arguments.addAll([
         '-map_metadata',
@@ -106,6 +130,69 @@ class CacheAudioMetadata {
     return arguments;
   }
 
+  static bool supportsEmbeddedCover(String outputPath) {
+    return const {
+      '.mp3',
+      '.m4a',
+      '.mp4',
+      '.mov',
+      '.flac',
+      '.mka',
+      '.mkv',
+    }.contains(p.extension(outputPath).toLowerCase());
+  }
+
+  static bool shouldEmbedCover({
+    required bool retainMetadata,
+    required String outputPath,
+    String? coverPath,
+  }) {
+    return retainMetadata &&
+        coverPath != null &&
+        coverPath.trim().isNotEmpty &&
+        supportsEmbeddedCover(outputPath);
+  }
+
+  static List<String> coverOutputArguments() {
+    return const [
+      '-c:v',
+      'mjpeg',
+      '-q:v',
+      '2',
+      '-disposition:v:0',
+      'attached_pic',
+      '-metadata:s:v:0',
+      'title=Album cover',
+      '-metadata:s:v:0',
+      'comment=Cover (front)',
+    ];
+  }
+
+  static Future<void> validateAudioOutput(String outputPath) async {
+    final outputFile = File(outputPath);
+    if (!await outputFile.exists() || await outputFile.length() == 0) {
+      throw const CacheAudioMetadataException('缓存音频校验失败：输出文件为空');
+    }
+
+    final session = await FFprobeKit.getMediaInformation(outputPath);
+    final information = session.getMediaInformation();
+    final hasAudio =
+        information?.getStreams().any(
+          (stream) => stream.getType() == 'audio',
+        ) ??
+        false;
+    final duration = double.tryParse(information?.getDuration() ?? '');
+    if (hasAudio && (duration == null || duration > 0)) return;
+
+    final output = await session.getOutput();
+    final details = output?.trim() ?? '';
+    throw CacheAudioMetadataException(
+      details.isEmpty
+          ? '缓存音频校验失败：未检测到有效音频流'
+          : '缓存音频校验失败：未检测到有效音频流\n${_errorMessage(details)}',
+    );
+  }
+
   static String temporaryOutputPath(String targetPath) {
     final extension = p.extension(targetPath);
     if (extension.isEmpty) return '$targetPath.listen1-metadata.mka';
@@ -118,6 +205,12 @@ class CacheAudioMetadata {
     return '${p.withoutExtension(targetPath)}.listen1-download$extension';
   }
 
+  static String temporaryCoverPath(String targetPath) {
+    final extension = p.extension(targetPath);
+    if (extension.isEmpty) return '$targetPath.listen1-cover.image';
+    return '${p.withoutExtension(targetPath)}.listen1-cover.image';
+  }
+
   static Future<FFmpegSession> _execute(List<String> arguments) async {
     final completedSession = Completer<FFmpegSession>();
     await FFmpegKit.executeWithArgumentsAsync(arguments, (session) {
@@ -126,10 +219,31 @@ class CacheAudioMetadata {
     return completedSession.future;
   }
 
-  static void _addMetadata(List<String> arguments, String key, String? value) {
+  static void _addTrackMetadata(
+    List<String> arguments,
+    CacheTrackMetadata? metadata, {
+    required String specifier,
+  }) {
+    _addMetadata(arguments, 'title', metadata?.title, specifier: specifier);
+    _addMetadata(arguments, 'artist', metadata?.artist, specifier: specifier);
+    _addMetadata(arguments, 'album', metadata?.album, specifier: specifier);
+    _addMetadata(
+      arguments,
+      'album_artist',
+      metadata?.albumArtist,
+      specifier: specifier,
+    );
+  }
+
+  static void _addMetadata(
+    List<String> arguments,
+    String key,
+    String? value, {
+    required String specifier,
+  }) {
     final normalized = value?.replaceAll('\u0000', '').trim() ?? '';
     if (normalized.isEmpty) return;
-    arguments.addAll(['-metadata', '$key=$normalized']);
+    arguments.addAll(['-metadata:$specifier', '$key=$normalized']);
   }
 
   static String _errorMessage(String? output) {

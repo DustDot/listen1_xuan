@@ -23,6 +23,8 @@ import 'settings_controller.dart';
 import 'package:listen1_xuan/models/Track.dart';
 
 class CacheController extends GetxController {
+  static const int _maxCoverArtBytes = 20 * 1024 * 1024;
+
   final Logger _logger = Logger();
   final String _localCacheListKey = 'local-cache-list';
   final _localCacheList = <String, String>{}.obs;
@@ -273,14 +275,22 @@ class CacheController extends GetxController {
     required void Function(int count, int total) onReceiveProgress,
   }) async {
     final partialFile = File('$filePath.listen1-part.mp3');
+    final retainMetadata = _settingsController.cacheRetainMetadata;
+    File? coverFile;
     try {
       if (await partialFile.exists()) await partialFile.delete();
+      coverFile = await _downloadCoverArt(
+        track: track,
+        outputPath: partialFile.path,
+        retainMetadata: retainMetadata,
+      );
       await const BilibiliMp3Transcoder().transcode(
         dio: dioWithCookieManager,
         sourceUrl: sourceUrl,
         outputPath: partialFile.path,
-        retainMetadata: _settingsController.cacheRetainMetadata,
+        retainMetadata: retainMetadata,
         metadata: _metadataForTrack(track),
+        coverPath: coverFile?.path,
         onDownloadProgress: onReceiveProgress,
       );
       final outputFile = File(filePath);
@@ -289,6 +299,8 @@ class CacheController extends GetxController {
     } catch (_) {
       if (await partialFile.exists()) await partialFile.delete();
       rethrow;
+    } finally {
+      await _deleteTemporaryCover(coverFile);
     }
   }
 
@@ -304,13 +316,23 @@ class CacheController extends GetxController {
     final metadataOutput = File(
       CacheAudioMetadata.temporaryOutputPath(outputPath),
     );
+    final retainMetadata = _settingsController.cacheRetainMetadata;
+    File? coverFile;
     try {
       if (await metadataOutput.exists()) await metadataOutput.delete();
+      if (track != null) {
+        coverFile = await _downloadCoverArt(
+          track: track,
+          outputPath: metadataOutput.path,
+          retainMetadata: retainMetadata,
+        );
+      }
       await const CacheAudioMetadata().rewrite(
         inputPath: inputPath,
         outputPath: metadataOutput.path,
-        retainMetadata: _settingsController.cacheRetainMetadata,
+        retainMetadata: retainMetadata,
         metadata: track == null ? null : _metadataForTrack(track),
+        coverPath: coverFile?.path,
       );
 
       final outputFile = File(outputPath);
@@ -319,6 +341,64 @@ class CacheController extends GetxController {
     } catch (_) {
       if (await metadataOutput.exists()) await metadataOutput.delete();
       rethrow;
+    } finally {
+      await _deleteTemporaryCover(coverFile);
+    }
+  }
+
+  Future<File?> _downloadCoverArt({
+    required Track track,
+    required String outputPath,
+    required bool retainMetadata,
+  }) async {
+    if (!retainMetadata ||
+        !CacheAudioMetadata.supportsEmbeddedCover(outputPath)) {
+      return null;
+    }
+
+    var coverUrl = track.img_url?.trim() ?? '';
+    if (coverUrl.isEmpty) return null;
+    coverUrl = coverUrl.replaceAll('{size}', '500');
+    if (coverUrl.startsWith('//')) coverUrl = 'https:$coverUrl';
+    final uri = Uri.tryParse(coverUrl);
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+      return null;
+    }
+
+    final coverFile = File(CacheAudioMetadata.temporaryCoverPath(outputPath));
+    try {
+      if (await coverFile.exists()) await coverFile.delete();
+      final isBilibiliCover =
+          track.source == PlatformSource.bilibili.name ||
+          track.id.startsWith('bi');
+      Map<String, String>? headers;
+      if (isBilibiliCover) {
+        headers = Map<String, String>.from(kBilibiliPlayHeader)
+          ..remove(HttpHeaders.rangeHeader);
+      }
+      await dioWithCookieManager.download(
+        uri.toString(),
+        coverFile.path,
+        options: headers == null ? null : Options(headers: headers),
+      );
+      final length = await coverFile.length();
+      if (length == 0 || length > _maxCoverArtBytes) {
+        throw const FormatException('歌曲封面为空或超过 20MB');
+      }
+      return coverFile;
+    } catch (error) {
+      _logger.w('下载歌曲封面失败: $coverUrl', error: error);
+      if (await coverFile.exists()) await coverFile.delete();
+      return null;
+    }
+  }
+
+  Future<void> _deleteTemporaryCover(File? coverFile) async {
+    if (coverFile == null) return;
+    try {
+      if (await coverFile.exists()) await coverFile.delete();
+    } catch (error) {
+      _logger.w('临时歌曲封面删除失败: ${coverFile.path}', error: error);
     }
   }
 

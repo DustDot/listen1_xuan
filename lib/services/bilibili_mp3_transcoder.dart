@@ -25,6 +25,7 @@ class BilibiliMp3Transcoder {
     required String outputPath,
     required bool retainMetadata,
     CacheTrackMetadata? metadata,
+    String? coverPath,
     BilibiliDownloadProgress? onDownloadProgress,
     BilibiliTranscodeProgress? onTranscodeProgress,
   }) async {
@@ -42,6 +43,7 @@ class BilibiliMp3Transcoder {
           outputPath,
           retainMetadata: retainMetadata,
           metadata: metadata,
+          coverPath: coverPath,
         ),
         (session) {
           if (!completedSession.isCompleted) completedSession.complete(session);
@@ -61,6 +63,7 @@ class BilibiliMp3Transcoder {
         final output = await session.getOutput();
         throw BilibiliTranscodeException(_errorMessage(output));
       }
+      await CacheAudioMetadata.validateAudioOutput(outputPath);
     } finally {
       await proxy.close();
     }
@@ -71,7 +74,13 @@ class BilibiliMp3Transcoder {
     String outputPath, {
     bool retainMetadata = false,
     CacheTrackMetadata? metadata,
+    String? coverPath,
   }) {
+    final embedCover = CacheAudioMetadata.shouldEmbedCover(
+      retainMetadata: retainMetadata,
+      outputPath: outputPath,
+      coverPath: coverPath,
+    );
     return [
       '-hide_banner',
       '-nostdin',
@@ -85,9 +94,11 @@ class BilibiliMp3Transcoder {
       '5',
       '-i',
       inputUrl,
+      if (embedCover) ...['-i', coverPath!],
       '-map',
       '0:a:0',
-      '-vn',
+      if (embedCover) ...['-map', '1:v:0'],
+      if (!embedCover) '-vn',
       '-ac',
       '2',
       '-c:a',
@@ -98,6 +109,7 @@ class BilibiliMp3Transcoder {
       '9',
       '-threads',
       '0',
+      if (embedCover) ...CacheAudioMetadata.coverOutputArguments(),
       ...CacheAudioMetadata.outputMetadataArguments(
         retainMetadata: retainMetadata,
         metadata: metadata,
